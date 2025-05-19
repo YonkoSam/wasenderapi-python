@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wasenderapi"
+version = "0.1.0"
+authors = [
+    { name = "YonkoSam", email = "absamlani@gmail.com" },
+]
+description = "The official Python SDK for the Wasender API, allowing you to programmatically send WhatsApp messages, manage contacts, groups, sessions, and handle webhooks."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+keywords = ["whatsapp", "api", "sdk", "wasender", "messaging", "chatbot"]
+
+dependencies = [
+    "httpx>=0.23.0,<0.28.0",
+    "pydantic>=2.0,<3.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/YonkoSam/wasenderapi-python" # Assuming this will be your repo URL
+"Documentation" = "https://github.com/YonkoSam/wasenderapi-python/tree/main/docs" # Assuming
+"Repository" = "https://github.com/YonkoSam/wasenderapi-python"
+"Bug Tracker" = "https://github.com/YonkoSam/wasenderapi-python/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0,<8.0.0",
+    "pytest-asyncio>=0.20.0,<0.24.0",
+    "respx>=0.20.0,<0.21.0",
+    "mypy>=1.0.0,<2.0.0",
+    "ruff>=0.1.0,<0.2.0",
+    "pre-commit>=3.0.0,<4.0.0"
+] 
