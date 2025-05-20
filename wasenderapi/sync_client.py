@@ -210,7 +210,7 @@ class WasenderSyncClient:
         payload: Dict[str, Any] = {**kwargs}
         payload["to"] = to
         payload["messageType"] = "text"
-        payload["text"] = {"body": text_body}
+        payload["text"] = text_body
         result = self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
@@ -218,10 +218,9 @@ class WasenderSyncClient:
         payload: Dict[str, Any] = {**kwargs}
         payload["to"] = to
         payload["messageType"] = "image"
-        image_payload = {"url": url}
+        payload["imageUrl"] = url
         if caption:
-            image_payload["caption"] = caption
-        payload["image"] = image_payload
+            payload["text"] = caption
         result = self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
@@ -229,10 +228,9 @@ class WasenderSyncClient:
         payload: Dict[str, Any] = {**kwargs}
         payload["to"] = to
         payload["messageType"] = "video"
-        video_payload = {"url": url}
+        payload["videoUrl"] = url
         if caption:
-            video_payload["caption"] = caption
-        payload["video"] = video_payload
+            payload["text"] = caption
         result = self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
@@ -240,21 +238,17 @@ class WasenderSyncClient:
         payload: Dict[str, Any] = {**kwargs}
         payload["to"] = to
         payload["messageType"] = "document"
-        document_payload = {"url": url, "filename": filename}
+        payload["documentUrl"] = url
         if caption:
-            document_payload["caption"] = caption
-        payload["document"] = document_payload
+            payload["text"] = caption
         result = self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
     def send_audio(self, to: str, url: str, **kwargs: Any) -> WasenderSendResult:
-        payload: Dict[str, Any] = {k: v for k, v in kwargs.items() if k != 'ptt'}
+        payload: Dict[str, Any] = {**kwargs}
         payload["to"] = to
         payload["messageType"] = "audio"
-        audio_payload = {"url": url}
-        if "ptt" in kwargs:
-            audio_payload["ptt"] = kwargs["ptt"]
-        payload["audio"] = audio_payload
+        payload["audioUrl"] = url
         result = self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
@@ -262,7 +256,7 @@ class WasenderSyncClient:
         payload: Dict[str, Any] = {**kwargs}
         payload["to"] = to
         payload["messageType"] = "sticker"
-        payload["sticker"] = {"url": url}
+        payload["stickerUrl"] = url
         result = self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
@@ -270,7 +264,7 @@ class WasenderSyncClient:
         payload: Dict[str, Any] = {**kwargs}
         payload["to"] = to
         payload["messageType"] = "contact"
-        payload["contact"] = {"name": contact_name, "phoneNumber": contact_phone_number}
+        payload["contact"] = {"name": contact_name, "phone": contact_phone_number}
         result = self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 

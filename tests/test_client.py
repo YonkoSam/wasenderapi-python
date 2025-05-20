@@ -63,7 +63,7 @@ async def test_send_text_constructs_correct_payload_and_calls_post_internal(asyn
     expected_payload = {
         "to": test_to,
         "messageType": "text",
-        "text": {"body": test_body},
+        "text": test_body,
         "custom_param": "test_val"
     }
     assert args[1] == expected_payload
@@ -89,13 +89,15 @@ async def test_send_image(async_client_with_mocked_post, success_api_response_da
     response = await client.send_image(to=test_to, url=test_url, caption=test_caption)
         
     client._post_internal.assert_called_once_with(
-        "/send-message", 
+        "/send-message",
         {
-            "to": test_to, 
+            "to": test_to,
             "messageType": "image",
-            "image": {"url": test_url, "caption": test_caption}
+            "imageUrl": test_url,
+            "text": test_caption
         }
     )
+    assert isinstance(response, WasenderSendResult)
     assert response.response.success == True
     assert response.response.message == success_api_response_data["message"]
     assert response.rate_limit.limit == rate_limit_data["limit"]
@@ -115,13 +117,15 @@ async def test_send_video(async_client_with_mocked_post, success_api_response_da
     response = await client.send_video(to=test_to, url=test_url, caption=test_caption)
             
     client._post_internal.assert_called_once_with(
-        "/send-message", 
+        "/send-message",
         {
-            "to": test_to, 
+            "to": test_to,
             "messageType": "video",
-            "video": {"url": test_url, "caption": test_caption}
+            "videoUrl": test_url,
+            "text": test_caption
         }
     )
+    assert isinstance(response, WasenderSendResult)
     assert response.response.success == True
     assert response.response.message == success_api_response_data["message"]
 
@@ -141,13 +145,15 @@ async def test_send_document(async_client_with_mocked_post, success_api_response
     response = await client.send_document(to=test_to, url=test_url, filename=test_filename, caption=test_caption)
     
     client._post_internal.assert_called_once_with(
-        "/send-message", 
+        "/send-message",
         {
-            "to": test_to, 
+            "to": test_to,
             "messageType": "document",
-            "document": {"url": test_url, "filename": test_filename, "caption": test_caption}
+            "documentUrl": test_url,
+            "text": test_caption
         }
     )
+    assert isinstance(response, WasenderSendResult)
     assert response.response.success == True
     assert response.response.message == success_api_response_data["message"]
 
@@ -169,17 +175,17 @@ async def test_send_audio(async_client_with_mocked_post, success_api_response_da
         {
             "to": test_to,
             "messageType": "audio",
-            "audio": {"url": test_url, "ptt": False}
+            "audioUrl": test_url,
+            "ptt": False
         }
     )
-    assert response_no_ptt.response.success is True
+    assert isinstance(response_no_ptt, WasenderSendResult)
+    assert response_no_ptt.response.data.message_id == success_api_response_data["data"]["messageId"]
 
     # Test Case 2: ptt = True
-    client._post_internal.reset_mock() # Reset mock for a clean assertion
-    # Update message_id for distinct response if necessary, though not asserted here
-    updated_success_data = {**success_api_response_data, "data": {**success_api_response_data["data"], "message_id": "mock_audio_ptt_true"}}
-    client._post_internal.return_value = {
-        "response": updated_success_data, # Use potentially updated data
+    client._post_internal.reset_mock()
+    client._post_internal.return_value = { # Assuming same response structure for simplicity
+        "response": success_api_response_data,
         "rate_limit": rate_limit_data
     }
     response_ptt = await client.send_audio(to=test_to, url=test_url, ptt=True)
@@ -188,10 +194,30 @@ async def test_send_audio(async_client_with_mocked_post, success_api_response_da
         {
             "to": test_to,
             "messageType": "audio",
-            "audio": {"url": test_url, "ptt": True}
+            "audioUrl": test_url,
+            "ptt": True
         }
     )
-    assert response_ptt.response.success is True
+    assert isinstance(response_ptt, WasenderSendResult)
+    assert response_ptt.response.data.message_id == success_api_response_data["data"]["messageId"]
+
+    # Test Case 3: ptt not provided (should default or not be included if None)
+    client._post_internal.reset_mock()
+    client._post_internal.return_value = {
+        "response": success_api_response_data,
+        "rate_limit": rate_limit_data
+    }
+    response_no_ptt_arg = await client.send_audio(to=test_to, url=test_url) # ptt not passed
+    client._post_internal.assert_called_once_with(
+        "/send-message",
+        {
+            "to": test_to,
+            "messageType": "audio",
+            "audioUrl": test_url # ptt should not be in payload if not provided
+        }
+    )
+    assert isinstance(response_no_ptt_arg, WasenderSendResult)
+    assert response_no_ptt_arg.response.data.message_id == success_api_response_data["data"]["messageId"]
 
 @pytest.mark.asyncio
 async def test_send_location(async_client_with_mocked_post, success_api_response_data, rate_limit_data):
