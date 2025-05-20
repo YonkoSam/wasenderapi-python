@@ -3,6 +3,7 @@ from enum import Enum
 from datetime import datetime
 from pydantic import BaseModel, Field
 from .models import RateLimitInfo
+from .webhook import WasenderWebhookEventType
 
 class WhatsAppSessionStatus(str, Enum):
     CONNECTED = "connected"
@@ -14,42 +15,42 @@ class WhatsAppSessionStatus(str, Enum):
 
 class WhatsAppSession(BaseModel):
     id: int
-    user_id: int = Field(..., alias="userId")
+    user_id: int 
     name: str
-    phone_number: str = Field(..., alias="phoneNumber")
+    phone_number: str 
     status: WhatsAppSessionStatus
-    api_key: str = Field(..., alias="apiKey")
-    session_data: dict = Field(..., alias="sessionData")
-    last_active_at: datetime = Field(..., alias="lastActiveAt")
-    account_protection: bool = Field(..., alias="accountProtection")
-    log_messages: bool = Field(..., alias="logMessages")
-    webhook_url: Optional[str] = Field(None, alias="webhookUrl")
-    webhook_enabled: bool = Field(..., alias="webhookEnabled")
-    webhook_events: Optional[List[str]] = Field(None, alias="webhookEvents")
-    webhook_secret: str = Field(..., alias="webhookSecret")
-    created_at: datetime = Field(..., alias="createdAt")
-    updated_at: datetime = Field(..., alias="updatedAt")
+    api_key: str
+    session_data: dict
+    last_active_at: datetime    
+    account_protection: bool
+    log_messages: bool
+    webhook_url: Optional[str] = None
+    webhook_enabled: bool   
+    webhook_events: Optional[List[WasenderWebhookEventType]] = None
+    webhook_secret: str 
+    created_at: datetime 
+    updated_at: datetime 
 
 
 
 
 class CreateWhatsAppSessionPayload(BaseModel):
     name: str
-    phone_number: str = Field(..., alias="phoneNumber")
-    account_protection: bool = Field(..., alias="accountProtection")
-    log_messages: bool = Field(..., alias="logMessages")
-    webhook_url: Optional[str] = Field(None, alias="webhookUrl")
-    webhook_enabled: Optional[bool] = Field(None, alias="webhookEnabled")
-    webhook_events: Optional[List[str]] = Field(None, alias="webhookEvents")
+    phone_number: str 
+    account_protection: bool 
+    log_messages: bool 
+    webhook_url: Optional[str] = None
+    webhook_enabled: Optional[bool] = None
+    webhook_events: Optional[List[WasenderWebhookEventType]] = None
 
 class UpdateWhatsAppSessionPayload(BaseModel):
     name: Optional[str] = None
-    phone_number: Optional[str] = Field(None, alias="phoneNumber")
-    account_protection: Optional[bool] = Field(None, alias="accountProtection")
-    log_messages: Optional[bool] = Field(None, alias="logMessages")
-    webhook_url: Optional[str] = Field(None, alias="webhookUrl")
-    webhook_enabled: Optional[bool] = Field(None, alias="webhookEnabled")
-    webhook_events: Optional[List[str]] = Field(None, alias="webhookEvents")
+    phone_number: Optional[str] = None
+    account_protection: Optional[bool] = None
+    log_messages: Optional[bool] = None
+    webhook_url: Optional[str] = None
+    webhook_enabled: Optional[bool] = None
+    webhook_events: Optional[List[WasenderWebhookEventType]] = None
 
 class ConnectSessionPayload(BaseModel):
     qr_as_image: Optional[bool] = Field(None, alias="qrAsImage")
@@ -60,7 +61,7 @@ class ConnectSessionResponseData(BaseModel):
     message: Optional[str] = None
 
 class QRCodeResponseData(BaseModel):
-    qr_code: str = Field(..., alias="qrCode")
+    qr_code: str 
 
 class DisconnectSessionResponseData(BaseModel):
     status: WhatsAppSessionStatus
@@ -68,7 +69,7 @@ class DisconnectSessionResponseData(BaseModel):
 
 class RegenerateApiKeyResponse(BaseModel):
     success: bool = True
-    api_key: str = Field(..., alias="apiKey")
+    api_key: str 
 
 class SessionStatusData(BaseModel):
     status: WhatsAppSessionStatus

@@ -74,15 +74,15 @@ def mock_whatsapp_session_data():
     return {
         "id": 1,
         "name": "Business WhatsApp",
-        "phoneNumber": "+1234567890",
+        "phone_number": "+1234567890",
         "status": "connected",
-        "accountProtection": True,
-        "logMessages": True,
-        "webhookUrl": "https://example.com/webhook",
-        "webhookEnabled": True,
-        "webhookEvents": ["message", "group_update"],
-        "createdAt": "2025-04-01T12:00:00Z",
-        "updatedAt": "2025-05-08T15:30:00Z"
+        "account_protection": True,
+        "log_messages": True,
+        "webhook_url": "https://example.com/webhook",
+        "webhook_enabled": True,
+        "webhook_events": ["messages.upsert", "status.update"],
+        "created_at": "2025-04-01T12:00:00Z",
+        "updated_at": "2025-05-08T15:30:00Z"
     }
 
 @pytest.fixture
@@ -97,26 +97,26 @@ def mock_rate_limit_info_dict():
 def mock_whatsapp_session_api_data():
     return {
             "id": 123,
-            "userId": 456,
+            "user_id": 456,
             "name": "Test Session",
-            "phoneNumber": "+1234567890",
+            "phone_number": "+1234567890",
             "status": "connected",
-            "apiKey": "test_api_key_123",
-            "sessionData": {
+            "api_key": "test_api_key_123",
+            "session_data": {
                 "status_updated_at": "2025-01-01T12:00:00+00:00",
                 "status_info": {
                     "status": "connected"
                 }
             },
-            "lastActiveAt": "2025-01-01T12:00:00Z",
-            "createdAt": "2025-01-01T12:00:00Z",
-            "updatedAt": "2025-01-01T12:00:00Z",
-            "accountProtection": 1,
-            "logMessages": 1,
-            "webhookUrl": None,
-            "webhookEvents": [],
-            "webhookEnabled": False,
-            "webhookSecret": "test_webhook_secret_123"
+            "last_active_at": "2025-01-01T12:00:00Z",
+            "created_at": "2025-01-01T12:00:00Z",
+            "updated_at": "2025-01-01T12:00:00Z",
+            "account_protection": True,
+            "log_messages": True,
+            "webhook_url": None,
+            "webhook_events": [],
+            "webhook_enabled": False,
+            "webhook_secret": "test_webhook_secret_123"
     }
 
 @pytest.fixture
@@ -152,7 +152,7 @@ class TestSessionsClientMethods:
     async def test_get_qr_code(self, async_client_sessions_mocked_internals, mock_rate_limit_info_dict):
         client = async_client_sessions_mocked_internals
         session_id_int = 123
-        qr_data = {"qrCode": "base64qrdata"}
+        qr_data = {"qr_code": "base64qrdata"}
         mock_api_response_data = {"success": True, "message": "QR Code", "data": qr_data}
         client._get_internal.return_value = {"response": mock_api_response_data, "rate_limit": mock_rate_limit_info_dict}
 
@@ -217,7 +217,7 @@ class TestSessionsClientMethods:
     @pytest.mark.asyncio
     async def test_create_whatsapp_session(self, async_client_sessions_mocked_internals, mock_whatsapp_session_api_data, mock_rate_limit_info_dict):
         client = async_client_sessions_mocked_internals
-        payload_data = {"name": "New Session", "phoneNumber": "+123", "accountProtection": True, "logMessages": True}
+        payload_data = {"name": "New Session", "phone_number": "+123", "account_protection": True, "log_messages": True}
         payload_model = CreateWhatsAppSessionPayload(**payload_data)
         mock_api_response_data = {"success": True, "message": "Session created", "data": mock_whatsapp_session_api_data}
         client._post_internal.return_value = {"response": mock_api_response_data, "rate_limit": mock_rate_limit_info_dict}
@@ -239,7 +239,7 @@ class TestSessionsClientMethods:
 
         client._get_internal.assert_called_once_with(f"/whatsapp-sessions/{session_id_int}", use_personal_token=True)
         assert isinstance(result, GetWhatsAppSessionDetailsResult)
-        assert result.response.data.phone_number == mock_whatsapp_session_api_data["phoneNumber"]
+        assert result.response.data.phone_number == mock_whatsapp_session_api_data["phone_number"]
 
     @pytest.mark.asyncio
     async def test_update_whatsapp_session(self, async_client_sessions_mocked_internals, mock_whatsapp_session_api_data, mock_rate_limit_info_dict):
@@ -278,7 +278,7 @@ class TestSessionsClientMethods:
     async def test_regenerate_api_key(self, async_client_sessions_mocked_internals, mock_rate_limit_info_dict):
         client = async_client_sessions_mocked_internals
         session_id_int = 123
-        api_key_data = {"apiKey": "new_key_value"}
+        api_key_data = {"api_key": "new_key_value"}
         client._post_internal.return_value = {"response": api_key_data, "rate_limit": mock_rate_limit_info_dict}
 
         result: RegenerateApiKeyResult = await client.regenerate_api_key(session_id=session_id_int)
@@ -292,24 +292,24 @@ class TestSessionCoreModels:
         model = WhatsAppSession(**mock_whatsapp_session_api_data)
         assert model.id == mock_whatsapp_session_api_data["id"]
         assert model.name == mock_whatsapp_session_api_data["name"]
-        assert model.phone_number == mock_whatsapp_session_api_data["phoneNumber"]
+        assert model.phone_number == mock_whatsapp_session_api_data["phone_number"]
         assert model.status == WhatsAppSessionStatus.CONNECTED
         assert model.account_protection is True
         assert model.log_messages is True
-        assert model.webhook_url == mock_whatsapp_session_api_data["webhookUrl"]
-        assert model.webhook_enabled == mock_whatsapp_session_api_data["webhookEnabled"]
-        assert model.webhook_events == mock_whatsapp_session_api_data["webhookEvents"]
+        assert model.webhook_url == mock_whatsapp_session_api_data["webhook_url"]
+        assert model.webhook_enabled == mock_whatsapp_session_api_data["webhook_enabled"]
+        assert model.webhook_events == mock_whatsapp_session_api_data["webhook_events"]
         
-        expected_created_at_dt = datetime.fromisoformat(mock_whatsapp_session_api_data["createdAt"].replace("Z", "+00:00"))
-        expected_updated_at_dt = datetime.fromisoformat(mock_whatsapp_session_api_data["updatedAt"].replace("Z", "+00:00"))
+        expected_created_at_dt = datetime.fromisoformat(mock_whatsapp_session_api_data["created_at"].replace("Z", "+00:00"))
+        expected_updated_at_dt = datetime.fromisoformat(mock_whatsapp_session_api_data["updated_at"].replace("Z", "+00:00"))
         assert model.created_at == expected_created_at_dt
         assert model.updated_at == expected_updated_at_dt
 
         dumped_model = model.model_dump(by_alias=True, mode='json')
-        assert dumped_model["phoneNumber"] == mock_whatsapp_session_api_data["phoneNumber"]
+        assert dumped_model["phone_number"] == mock_whatsapp_session_api_data["phone_number"]
         
-        assert dumped_model["createdAt"] == mock_whatsapp_session_api_data["createdAt"]
-        assert dumped_model["updatedAt"] == mock_whatsapp_session_api_data["updatedAt"]
+        assert dumped_model["created_at"] == mock_whatsapp_session_api_data["created_at"]
+        assert dumped_model["updated_at"] == mock_whatsapp_session_api_data["updated_at"]
 
         model_fields = WhatsAppSession.model_fields.keys()
 
@@ -341,45 +341,45 @@ class TestSessionCoreModels:
 class TestSessionRequestPayloadModels:
     def test_create_whatsapp_session_payload(self):
         valid_data_all_fields = {
-            "name": "Test Session", "phoneNumber": "+19998887777",
-            "accountProtection": False, "logMessages": False,
-            "webhookUrl": "https://test.com/hook", "webhookEnabled": True,
-            "webhookEvents": ["message", "status"]
+            "name": "Test Session", "phone_number": "+19998887777",
+            "account_protection": False, "log_messages": False,
+            "webhook_url": "https://test.com/hook", "webhook_enabled": True,
+            "webhook_events": ["messages.upsert", "session.status"]
         }
         model = CreateWhatsAppSessionPayload(**valid_data_all_fields)
         assert model.name == valid_data_all_fields["name"]
-        assert model.phone_number == valid_data_all_fields["phoneNumber"]
-        assert model.webhook_events == valid_data_all_fields["webhookEvents"]
+        assert model.phone_number == valid_data_all_fields["phone_number"]
+        assert model.webhook_events == valid_data_all_fields["webhook_events"]
         dumped = model.model_dump(by_alias=True, exclude_none=True)
-        assert dumped["phoneNumber"] == valid_data_all_fields["phoneNumber"]
-        assert dumped["webhookUrl"] == valid_data_all_fields["webhookUrl"]
+        assert dumped["phone_number"] == valid_data_all_fields["phone_number"]
+        assert dumped["webhook_url"] == valid_data_all_fields["webhook_url"]
 
         valid_data_required_only = {
-            "name": "Minimal Session", "phoneNumber": "+12223334444",
-            "accountProtection": True, "logMessages": True
+            "name": "Minimal Session", "phone_number": "+12223334444",
+            "account_protection": True, "log_messages": True
         }
         model_req = CreateWhatsAppSessionPayload(**valid_data_required_only)
         assert model_req.name == valid_data_required_only["name"]
         assert model_req.webhook_url is None
         dumped_req = model_req.model_dump(by_alias=True, exclude_none=True)
-        assert "webhookUrl" not in dumped_req
-        assert "webhookEvents" not in dumped_req
+        assert "webhook_url" not in dumped_req
+        assert "webhook_events" not in dumped_req
 
         with pytest.raises(ValidationError):
-            CreateWhatsAppSessionPayload(phoneNumber="+1", accountProtection=True, logMessages=True)
+            CreateWhatsAppSessionPayload(phone_number="+1", account_protection=True, log_messages=True)
 
     def test_update_whatsapp_session_payload(self):
         payload_all = {
-            "name": "Updated Name", "phoneNumber": "+1newphone",
-            "accountProtection": True, "logMessages": False,
-            "webhookUrl": "https://new.hook", "webhookEnabled": False,
-            "webhookEvents": ["message"]
+            "name": "Updated Name", "phone_number": "+1newphone",
+            "account_protection": True, "log_messages": False,
+            "webhook_url": "https://new.hook", "webhook_enabled": False,
+            "webhook_events": ["messages.upsert"]
         }
         model_all = UpdateWhatsAppSessionPayload(**payload_all)
         assert model_all.name == payload_all["name"]
         dumped_all = model_all.model_dump(by_alias=True, exclude_none=True)
-        assert dumped_all["phoneNumber"] == payload_all["phoneNumber"]
-        assert dumped_all["webhookEvents"] == payload_all["webhookEvents"]
+        assert dumped_all["phone_number"] == payload_all["phone_number"]
+        assert dumped_all["webhook_events"] == payload_all["webhook_events"]
 
         payload_partial = {"name": "Partial Update"}
         model_partial = UpdateWhatsAppSessionPayload(**payload_partial)
@@ -424,7 +424,7 @@ class TestSessionResultModels:
         assert model_connected.rate_limit is None
 
     def test_qr_code_result_model(self, mock_rate_limit_info_dict):
-        qr_data = {"qrCode": "base64qr"}
+        qr_data = {"qr_code": "base64qr"}
         response = {"success": True, "message": "QR data", "data": qr_data}
         result_data = {"response": response, "rate_limit": mock_rate_limit_info_dict}
         model = GetQRCodeResult(**result_data)
@@ -439,8 +439,8 @@ class TestSessionResultModels:
         assert model.response.data.message == "Logged out"
 
     def test_regenerate_api_key_result_model(self, mock_rate_limit_info_dict):
-        api_key_data = {"apiKey": "newkey123"} # This is the structure of RegenerateApiKeyResponse
-        # Note: RegenerateApiKeyResponse itself has success=True and apiKey fields.
+        api_key_data = {"api_key": "newkey123"} # This is the structure of RegenerateApiKeyResponse
+        # Note: RegenerateApiKeyResponse itself has success=True and api_key fields.
         # It is not nested under a generic success/message/data structure like others.
         result_data = {"response": api_key_data, "rate_limit": mock_rate_limit_info_dict}
         model = RegenerateApiKeyResult(**result_data)
