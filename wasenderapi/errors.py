@@ -12,7 +12,7 @@ class WasenderErrorResponse(BaseModel):
 
 class WasenderSuccessResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
 
 WasenderAPIRawResponse = Union[WasenderSuccessResponse, WasenderErrorResponse]
 

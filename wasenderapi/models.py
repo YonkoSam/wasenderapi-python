@@ -3,13 +3,12 @@ from pydantic import BaseModel, Field, HttpUrl
 from datetime import datetime
 
 class Contact(BaseModel):
-    jid: str
+    id: str
     name: Optional[str] = None
     notify: Optional[str] = None
     verified_name: Optional[str] = Field(None, alias="verifiedName")
     img_url: Optional[str] = Field(None, alias="imgUrl")
     status: Optional[str] = None
-    exists: Optional[bool] = None
 
 class BaseMessage(BaseModel):
     to: str

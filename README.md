@@ -15,7 +15,7 @@ A lightweight and robust Python SDK for interacting with the Wasender API ([http
 
 - **Pydantic Models:** Leverages Pydantic for robust request/response validation and serialization, especially for the generic `send()` method and webhook event parsing.
 - **Message Sending:**
-  - Simplified helper methods (e.g., `client.send_text(to=\"...\", text_body=\"...\")`, `client.send_image(to=\"...\", url=\"...\", caption=\"...\")`) that accept direct parameters for common message types.
+  - Simplified helper methods (e.g., `client.send_text(to="...", text_body="...")`, `client.send_image(to="...", url="...", caption="...")`) that accept direct parameters for common message types.
   - Generic `client.send(payload: BaseMessage)` method for advanced use cases or less common message types, accepting a Pydantic model.
   - Support for text, image, video, document, audio, sticker, contact card, and location messages.
 - **Contact Management:** List, retrieve details, get profile pictures, block, and unblock contacts.
@@ -26,7 +26,7 @@ A lightweight and robust Python SDK for interacting with the Wasender API ([http
 - **Error Handling:** Comprehensive `WasenderAPIError` class with detailed error information.
 - **Rate Limiting:** Access to rate limit information on API responses.
 - **Retry Mechanism:** Optional automatic retries for rate-limited requests (HTTP 429) via `RetryConfig`.
-- **Customizable HTTP Client:** Allows providing a custom `fetch_implementation` (compatible with `requests.request` or an async equivalent) for specialized HTTP handling or testing.
+- **Customizable HTTP Client:** Allows providing a custom `httpx.AsyncClient` instance for the asynchronous client.
 
 ## Prerequisites
 
@@ -172,38 +172,22 @@ async def send_async_text_message(client):
 # if __name__ == "__main__":
 #     asyncio.run(main_async_send_example()) # Example of how to run it
 ```
-# For this example, we'll use the default internal HTTP client.
-# custom_fetch_impl: Optional[FetchImplementation] = None 
 
-# This block seems like an old/outdated example of client initialization. 
-# The create_sync_wasender and create_async_wasender are the preferred ways now.
-# It also uses WasenderClient which was the old name and personal_token instead of personal_access_token.
-# I will comment it out for now as it's confusing and outdated.
-# wasender_client_full = WasenderClient(
-#     api_key=api_key,
-#     # base_url="https://www.wasenderapi.com/api", # Defaults to this
-#     # fetch_implementation=custom_fetch_impl,
-#     retry_config=retry_config,
-#     webhook_secret=webhook_secret,
-#     personal_token=persona_token
-# )
-# 
-# # Basic initialization (session-scoped endpoints only, no retries, no webhooks)
-# basic_wasender_client = WasenderClient(api_key=api_key)
-# 
-# # Initialize with persona token (for account management, no retries, no webhooks)
-# account_wasender_client = WasenderClient(
-#     api_key=api_key,
-#     personal_token=persona_token
-# )
-# 
-# # Initialize with webhook secret (for webhook handling, no retries, no account management)
-# webhook_handler_client = WasenderClient(
-#     api_key=api_key,
-#     webhook_secret=webhook_secret
-# )
-# 
-# print("WasenderClient initialized.")
+## Usage Overview
+
+Using the SDK involves calling methods on the initialized client instance. For example, to send a message with the synchronous client:
+
+```python
+from wasenderapi.errors import WasenderAPIError
+
+try:
+    response = sync_client.send_text(to="1234567890", text_body="Hello from Python SDK!")
+    print(f"Message sent successfully: {response.response.data.message_id}")
+    if response.rate_limit:
+        print(f"Rate limit info: Remaining {response.rate_limit.remaining}")
+except WasenderAPIError as e:
+    print(f"API Error: {e.message} (Status: {e.status_code})")
+```
 
 ## Authentication
 
@@ -284,7 +268,7 @@ Send various types of messages including text, media (images, videos, documents,
 
 - **Detailed Documentation & Examples:** [`docs/messages.md`](./docs/messages.md)
 
-**Using the Synchronous Client (`WasenderSyncClient`)**
+#### Using the Synchronous Client (`WasenderSyncClient`)
 
 ```python
 import os
@@ -332,7 +316,7 @@ def send_sync_messages_example():
 #     send_sync_messages_example()
 ```
 
-**Using the Asynchronous Client (`WasenderAsyncClient`)**
+#### Using the Asynchronous Client (`WasenderAsyncClient`)
 
 ```python
 import asyncio
@@ -727,45 +711,6 @@ async def manage_whatsapp_sessions_example():
 ```
 
 ## Advanced Topics
-
-### Custom HTTP Client Fetch Implementation
-
-For advanced scenarios, such as custom logging, request/response modification, or integration with specific HTTP libraries, you can provide your own HTTP fetch implementation.
-
-**Synchronous Client:**
-
-When initializing `WasenderSyncClient` (or using `create_sync_wasender`), the underlying HTTP calls are made using the `requests` library by default. If you need to customize this, you would typically do so by configuring the global `requests` behavior or by wrapping calls to the SDK if fine-grained control per request is needed (though the SDK doesn't directly expose a hook for a custom *sync* fetch function in its constructor anymore after recent refactoring focused on `httpx` for async and standard `requests` for sync internally).
-
-**Asynchronous Client:**
-
-The `WasenderAsyncClient` (and `create_async_wasender` factory) uses `httpx.AsyncClient` internally. You can pass your pre-configured `httpx.AsyncClient` instance during initialization:
-
-```python
-import httpx
-from wasenderapi import create_async_wasender
-from wasenderapi.models import RetryConfig # Ensure RetryConfig is imported if used
-
-# Example: Configure a custom httpx.AsyncClient with a timeout
-custom_http_client = httpx.AsyncClient(timeout=10.0) 
-
-# Example API key and retry config
-api_key = "YOUR_API_KEY"
-retry_conf = RetryConfig(enabled=True, max_retries=2)
-
-async_client_custom = create_async_wasender(
-    api_key=api_key, 
-    http_client=custom_http_client, 
-    retry_options=retry_conf
-)
-
-async def use_custom_client():
-    async with async_client_custom:
-        # Make API calls
-        # e.g., status = await async_client_custom.get_session_status("your_session_id")
-        print("Using async client with custom httpx client")
-
-# await use_custom_client()
-```
 
 ### Configuring Retries
 

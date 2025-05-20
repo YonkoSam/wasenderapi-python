@@ -9,11 +9,15 @@ from wasenderapi.webhook import (
     WEBHOOK_SIGNATURE_HEADER,
     WasenderWebhookEventType as WebhookEventType,
     # WebhookHandler, # Removed: Does not exist
-    WasenderWebhookEvent # Import the Union type for direct parsing tests
+    WasenderWebhookEvent, # Import the Union type for direct parsing tests
+    MessagesUpsertData, SessionStatusData, QrCodeUpdatedData, GroupMetadata as WebhookGroupMetadata
 )
 from typing import Dict, Any
 from dataclasses import dataclass
 from pydantic import TypeAdapter # Add this import
+from wasenderapi import webhook as webhook_models # Added this import
+from unittest.mock import AsyncMock # To mock the internal async verification if needed
+import asyncio
 
 SECRET = "shh!"
 
@@ -154,10 +158,17 @@ class TestWebhookEventHandling:
         assert evt.data == ["1234567890"]
 
     def test_parses_groups_upsert_event_correctly_model(self):
-        participant1_data = {"jid": "1234567890", "isAdmin": True, "isSuperAdmin": True}
+        participant1_data = {"id": "1234567890@s.whatsapp.net", "admin": "superadmin"}
+        participant2_data = {"id": "0987654321@s.whatsapp.net", "admin": "admin"}
+        participant3_data = {"id": "1122334455@s.whatsapp.net", "admin": None}
+
         group_data = {
-            "jid": "123456789-987654321@g.us", "subject": "Group Name", "creation": 1633456700,
-            "owner": "1234567890", "desc": "Group description", "participants": [participant1_data]
+            "jid": "123456789-987654321@g.us",
+            "subject": "Group Name", 
+            "creation": 1633456700,
+            "owner": "1234567890@s.whatsapp.net", 
+            "desc": "Group description", 
+            "participants": [participant1_data, participant2_data, participant3_data]
         }
         payload = {
             "type": WebhookEventType.GROUPS_UPSERT.value,
@@ -166,9 +177,21 @@ class TestWebhookEventHandling:
         }
         adapter = TypeAdapter(WasenderWebhookEvent)
         evt = adapter.validate_python(payload)
+
         assert evt.type == WebhookEventType.GROUPS_UPSERT
-        assert evt.data[0].jid == group_data["jid"]
-        assert evt.data[0].participants[0].is_admin == True
+        assert isinstance(evt.data, list)
+        assert len(evt.data) == 1
+        parsed_group_metadata = evt.data[0]
+        assert isinstance(parsed_group_metadata, WebhookGroupMetadata)
+        assert parsed_group_metadata.jid == group_data["jid"]
+        assert parsed_group_metadata.subject == group_data["subject"]
+        assert len(parsed_group_metadata.participants) == 3
+        assert parsed_group_metadata.participants[0].id == participant1_data["id"]
+        assert parsed_group_metadata.participants[0].admin == "superadmin"
+        assert parsed_group_metadata.participants[1].id == participant2_data["id"]
+        assert parsed_group_metadata.participants[1].admin == "admin"
+        assert parsed_group_metadata.participants[2].id == participant3_data["id"]
+        assert parsed_group_metadata.participants[2].admin is None
 
     def test_parses_groups_update_event_correctly_model(self):
         group_update_data = {

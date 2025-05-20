@@ -312,7 +312,7 @@ class WasenderSyncClient:
         return GetAllGroupsResult(**result)
 
     def get_group_metadata(self, group_jid: str) -> GetGroupMetadataResult:
-        result = self._get_internal(f"/groups/{group_jid}")
+        result = self._get_internal(f"/groups/{group_jid}/metadata")
         return GetGroupMetadataResult(**result)
 
     def get_group_participants(self, group_jid: str) -> GetGroupParticipantsResult:

@@ -27,13 +27,12 @@ def mock_rate_limit_info_dict():
 @pytest.fixture
 def specific_contact_api_data_for_model_test(): # Renamed fixture
     return {
-        "jid": "1234567890@s.whatsapp.net",
+        "id": "1234567890@s.whatsapp.net",
         "name": "Contact Name API Model Test",
         "notify": "Contact Display API Model Test",
         "verifiedName": "Verified Business API Model Test",
         "imgUrl": "https://profile.pic.url/model_test.jpg",
-        "status": "API status: Model Test Active!",
-        "exists": True
+        "status": "API status: Model Test Active!"
     }
 
 @pytest.fixture
@@ -42,7 +41,7 @@ def mock_multiple_contacts_api_data(specific_contact_api_data_for_model_test): #
     # Assuming it still uses a general form, let's define one or use the name that might be from conftest if needed by other tests.
     # For now, let it use the renamed one to see the effect. Or, create another general one if needed.
     contact2 = specific_contact_api_data_for_model_test.copy()
-    contact2["jid"] = "0987654321@s.whatsapp.net"
+    contact2["id"] = "0987654321@s.whatsapp.net"
     contact2["name"] = "Another Contact API Model Test"
     return [specific_contact_api_data_for_model_test, contact2]
 
@@ -61,27 +60,26 @@ class TestContactModel: # Renamed from TestCoreDataStructures
         # Pydantic should use the aliases to populate the snake_case fields.
         contact = Contact(**specific_contact_api_data_for_model_test)
         
-        assert contact.jid == specific_contact_api_data_for_model_test["jid"]
+        assert contact.id == specific_contact_api_data_for_model_test["id"]
         assert contact.name == specific_contact_api_data_for_model_test["name"]
         # Now check the model's snake_case attributes against the fixture's camelCase values
         assert contact.verified_name == specific_contact_api_data_for_model_test["verifiedName"]
         assert contact.img_url == specific_contact_api_data_for_model_test["imgUrl"]
         assert contact.status == specific_contact_api_data_for_model_test["status"]
-        assert contact.exists == specific_contact_api_data_for_model_test["exists"]
 
         dumped_contact = contact.model_dump(by_alias=True)
         assert dumped_contact["verifiedName"] == specific_contact_api_data_for_model_test["verifiedName"]
         assert dumped_contact["imgUrl"] == specific_contact_api_data_for_model_test["imgUrl"]
 
     def test_contact_model_minimal_fields(self):
-        minimal_data = {"jid": "0987654321@s.whatsapp.net"}
+        minimal_data = {"id": "0987654321@s.whatsapp.net"}
         contact = Contact(**minimal_data)
-        assert contact.jid == minimal_data["jid"]
+        assert contact.id == minimal_data["id"]
         assert contact.name is None
         dumped_contact = contact.model_dump(by_alias=True, exclude_none=True)
         assert "name" not in dumped_contact
 
-    def test_contact_model_missing_jid_raises_error(self):
+    def test_contact_model_missing_id_raises_error(self):
         with pytest.raises(ValidationError):
             Contact(name="Test Name")
 
@@ -102,7 +100,7 @@ class TestContactResultModels:
         assert result_model.response.message == "Fetched contacts successfully"
         assert len(result_model.response.data) == 2
         assert isinstance(result_model.response.data[0], Contact)
-        assert result_model.response.data[0].jid == mock_multiple_contacts_api_data[0]["jid"]
+        assert result_model.response.data[0].id == mock_multiple_contacts_api_data[0]["id"]
         assert result_model.response.data[0].name == mock_multiple_contacts_api_data[0]["name"]
         # Check aliasing for verifiedName and imgUrl from the first contact
         assert result_model.response.data[0].verified_name == mock_multiple_contacts_api_data[0]["verifiedName"]
@@ -126,7 +124,7 @@ class TestContactResultModels:
 
         assert result_model.response.success is True
         assert isinstance(result_model.response.data, Contact)
-        assert result_model.response.data.jid == specific_contact_api_data_for_model_test["jid"]
+        assert result_model.response.data.id == specific_contact_api_data_for_model_test["id"]
         assert result_model.response.data.status == specific_contact_api_data_for_model_test["status"]
         assert result_model.rate_limit.remaining == mock_rate_limit_info_dict["remaining"]
 
@@ -208,7 +206,7 @@ class TestContactsClientMethods:
 
         client._get_internal.assert_called_once_with(f"/contacts/{contact_phone}")
         assert isinstance(result, GetContactInfoResult)
-        assert result.response.data.jid == specific_contact_api_data_for_model_test["jid"]
+        assert result.response.data.id == specific_contact_api_data_for_model_test["id"]
 
     @pytest.mark.asyncio
     async def test_get_contact_profile_picture(self, async_client_contacts_mocked_internals, mock_rate_limit_info_dict):

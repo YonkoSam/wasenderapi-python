@@ -3,21 +3,34 @@ from pydantic import BaseModel, Field
 from .models import RateLimitInfo
 
 class GroupParticipant(BaseModel):
-    jid: str
-    is_admin: bool = Field(..., alias="isAdmin")
-    is_super_admin: bool = Field(..., alias="isSuperAdmin")
+    id: str
+    admin: Optional[str] = None
 
 class BasicGroupInfo(BaseModel):
-    jid: str
+    id: str
     name: Optional[str] = None
     img_url: Optional[str] = Field(None, alias="imgUrl")
 
 class GroupMetadata(BasicGroupInfo):
     creation: int
     owner: Optional[str] = None
-    desc: Optional[str] = None
-    participants: List[GroupParticipant]
     subject: Optional[str] = None
+    subject_owner: Optional[str] = Field(None, alias="subjectOwner")
+    subject_time: Optional[int] = Field(None, alias="subjectTime")
+    desc: Optional[str] = None
+    desc_owner: Optional[str] = Field(None, alias="descOwner")
+    desc_id: Optional[str] = Field(None, alias="descId")
+    restrict: Optional[bool] = None
+    announce: Optional[bool] = None
+    is_community: Optional[bool] = Field(None, alias="isCommunity")
+    is_community_announce: Optional[bool] = Field(None, alias="isCommunityAnnounce")
+    join_approval_mode: Optional[bool] = Field(None, alias="joinApprovalMode")
+    member_add_mode: Optional[bool] = Field(None, alias="memberAddMode")
+    author: Optional[str] = None
+    size: Optional[int] = None
+    participants: List[GroupParticipant]
+    ephemeral_duration: Optional[int] = Field(None, alias="ephemeralDuration")
+    invite_code: Optional[str] = Field(None, alias="inviteCode")
 
 class ModifyGroupParticipantsPayload(BaseModel):
     participants: List[str]
@@ -39,27 +52,27 @@ class UpdateGroupSettingsResponseData(BaseModel):
 
 class GetAllGroupsResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: List[BasicGroupInfo]
 
 class GetGroupMetadataResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: GroupMetadata
 
 class GetGroupParticipantsResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: List[GroupParticipant]
 
 class ModifyGroupParticipantsResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: List[ParticipantActionStatus]
 
 class UpdateGroupSettingsResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: UpdateGroupSettingsResponseData
 
 # Result types including rate limiting

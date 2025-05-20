@@ -4,12 +4,12 @@ from .models import RateLimitInfo, Contact
 
 class GetAllContactsResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: List[Contact]
 
 class GetContactInfoResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: Contact
 
 class ProfilePicData(BaseModel):
@@ -17,15 +17,15 @@ class ProfilePicData(BaseModel):
 
 class GetContactProfilePictureResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: ProfilePicData
 
 class ContactActionData(BaseModel):
-    message: str
+    message: Optional[str] = None
 
 class ContactActionResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: ContactActionData
 
 # Result types including rate limiting

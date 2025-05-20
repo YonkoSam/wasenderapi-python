@@ -56,7 +56,7 @@ class QRCodeResponseData(BaseModel):
 
 class DisconnectSessionResponseData(BaseModel):
     status: WhatsAppSessionStatus
-    message: str
+    message: Optional[str] = None
 
 class RegenerateApiKeyResponse(BaseModel):
     success: bool = True
@@ -67,42 +67,42 @@ class SessionStatusData(BaseModel):
 
 class GetAllWhatsAppSessionsResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: List[WhatsAppSession]
 
 class GetWhatsAppSessionDetailsResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: WhatsAppSession
 
 class CreateWhatsAppSessionResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: WhatsAppSession
 
 class UpdateWhatsAppSessionResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: WhatsAppSession
 
 class DeleteWhatsAppSessionResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: None
 
 class ConnectSessionResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: ConnectSessionResponseData
 
 class GetQRCodeResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: QRCodeResponseData
 
 class DisconnectSessionResponse(BaseModel):
     success: bool = True
-    message: str
+    message: Optional[str] = None
     data: DisconnectSessionResponseData
 
 class GetSessionStatusResponse(BaseModel):

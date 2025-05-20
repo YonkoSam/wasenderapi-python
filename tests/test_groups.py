@@ -40,23 +40,21 @@ def mock_rate_limit_info_dict(): # Renamed from mock_rate_limit_info
 @pytest.fixture
 def mock_admin_participant_api_data(): # API-like data (camelCase)
     return {
-        "jid": "admin@s.whatsapp.net",
-        "isAdmin": True,
-        "isSuperAdmin": True
+        "id": "admin@s.whatsapp.net",
+        "admin": "superadmin",
     }
 
 @pytest.fixture
 def mock_participant_api_data(): # API-like data (camelCase)
     return {
-        "jid": "participant@s.whatsapp.net",
-        "isAdmin": False,
-        "isSuperAdmin": False
+        "id": "participant@s.whatsapp.net",
+        "admin": None,
     }
 
 @pytest.fixture
 def mock_basic_group_info_api_data(): # API-like data (camelCase)
     return {
-        "jid": "1234567890-1234567890@g.us",
+        "id": "1234567890-1234567890@g.us",
         "name": "Test Group Name API",
         "imgUrl": "https://group.pic/api.png"
     }
@@ -64,7 +62,7 @@ def mock_basic_group_info_api_data(): # API-like data (camelCase)
 @pytest.fixture
 def mock_basic_group_info_nulls_api_data(): # API-like data (camelCase)
     return {
-        "jid": "1234567890-1234567891@g.us",
+        "id": "1234567890-1234567891@g.us",
         "name": None,
         "imgUrl": None
     }
@@ -101,20 +99,21 @@ async def async_client_groups_mocked_internals():
 class TestGroupCoreModels:
     def test_group_participant_model(self, mock_admin_participant_api_data, mock_participant_api_data):
         admin_model = GroupParticipant(**mock_admin_participant_api_data) # camelCase from API to model
-        assert admin_model.jid == mock_admin_participant_api_data["jid"]
-        assert admin_model.is_admin is True
-        assert admin_model.is_super_admin is True
-        # Test serialization with by_alias=True
-        assert admin_model.model_dump(by_alias=True)["isAdmin"] is True
+        assert admin_model.id == mock_admin_participant_api_data["id"]
+        assert admin_model.admin == "superadmin"
+
+        dumped_admin = admin_model.model_dump(by_alias=False)
+        assert dumped_admin["admin"] == "superadmin"
 
         member_model = GroupParticipant(**mock_participant_api_data)
-        assert member_model.is_admin is False
-        with pytest.raises(ValidationError): # is_admin is required
-            GroupParticipant(jid="test@s.whatsapp.net", isSuperAdmin=False)
+        assert member_model.admin is None
+        
+        with pytest.raises(ValidationError):
+            GroupParticipant(admin="admin")
     
     def test_basic_group_info_model(self, mock_basic_group_info_api_data, mock_basic_group_info_nulls_api_data):
         group_model = BasicGroupInfo(**mock_basic_group_info_api_data)
-        assert group_model.jid == mock_basic_group_info_api_data["jid"]
+        assert group_model.id == mock_basic_group_info_api_data["id"]
         assert group_model.name == mock_basic_group_info_api_data["name"]
         assert group_model.img_url == mock_basic_group_info_api_data["imgUrl"]
         assert group_model.model_dump(by_alias=True)["imgUrl"] == mock_basic_group_info_api_data["imgUrl"]
@@ -123,24 +122,24 @@ class TestGroupCoreModels:
         assert group_nulls_model.name is None
         assert group_nulls_model.img_url is None
         assert "name" not in group_nulls_model.model_dump(by_alias=True, exclude_none=True)
-        with pytest.raises(ValidationError): # jid is required
+        with pytest.raises(ValidationError): # id is required
             BasicGroupInfo(name="Test")
 
     def test_group_metadata_model(self, mock_group_metadata_api_data, mock_participant_api_data):
         metadata_model = GroupMetadata(**mock_group_metadata_api_data)
-        assert metadata_model.jid == mock_group_metadata_api_data["jid"]
+        assert metadata_model.id == mock_group_metadata_api_data["id"]
         assert metadata_model.creation == mock_group_metadata_api_data["creation"]
         assert metadata_model.owner == mock_group_metadata_api_data["owner"]
         assert metadata_model.desc == mock_group_metadata_api_data["desc"]
         assert len(metadata_model.participants) == 2
         assert isinstance(metadata_model.participants[0], GroupParticipant)
-        assert metadata_model.participants[0].is_super_admin is True
+        assert metadata_model.participants[0].admin == "superadmin"
         assert metadata_model.subject == mock_group_metadata_api_data["subject"]
 
         # Test with minimal data (optional fields missing)
         minimal_participant_dict = mock_participant_api_data # This is already the dict result from the fixture
         minimal_data = {
-            "jid": "groupjid@g.us",
+            "id": "groupid@g.us",
             "creation": 1678886401,
             "participants": [minimal_participant_dict] 
             # owner, desc, subject, name, imgUrl are optional
@@ -239,7 +238,7 @@ class TestGroupResultModels:
         assert result_model.response.success is True
         assert isinstance(result_model.response.data, GroupMetadata)
         assert result_model.response.data.desc == mock_group_metadata_api_data["desc"]
-        assert result_model.response.data.participants[0].is_admin == mock_group_metadata_api_data["participants"][0]["isAdmin"]
+        assert result_model.response.data.participants[0].admin == mock_group_metadata_api_data["participants"][0]["admin"]
         assert result_model.rate_limit.remaining == mock_rate_limit_info_dict["remaining"]
 
     def test_get_group_participants_result(self, mock_admin_participant_api_data, mock_participant_api_data, mock_rate_limit_info_dict):
@@ -251,8 +250,9 @@ class TestGroupResultModels:
         assert result_model.response.success is True
         assert len(result_model.response.data) == 2
         assert isinstance(result_model.response.data[0], GroupParticipant)
-        assert result_model.response.data[0].is_super_admin == api_participants_list[0]["isSuperAdmin"]
-        assert result_model.rate_limit is not None
+        assert result_model.response.data[0].admin == api_participants_list[0]["admin"]
+        assert result_model.response.data[1].admin == api_participants_list[1]["admin"]
+        assert result_model.rate_limit.limit == mock_rate_limit_info_dict["limit"]
 
     def test_modify_group_participants_result(self, mock_rate_limit_info_dict):
         action_status_api_data = [{"status": 200, "jid": "123@s.whatsapp.net", "message": "added"}]
@@ -292,84 +292,81 @@ class TestGroupsClientMethods:
     @pytest.mark.asyncio
     async def test_get_group_metadata(self, async_client_groups_mocked_internals, mock_group_metadata_api_data, mock_rate_limit_info_dict):
         client = async_client_groups_mocked_internals
-        group_jid = "testgroup@g.us"
+        group_jid_val = "testgroup@g.us"
         mock_response_payload = {"success": True, "message": "Group metadata", "data": mock_group_metadata_api_data}
         client._get_internal.return_value = {"response": mock_response_payload, "rate_limit": mock_rate_limit_info_dict}
 
-        result: GetGroupMetadataResult = await client.get_group_metadata(group_jid=group_jid)
+        result: GetGroupMetadataResult = await client.get_group_metadata(group_jid=group_jid_val)
 
-        client._get_internal.assert_called_once_with(f"/groups/{group_jid}")
+        client._get_internal.assert_called_once_with(f"/groups/{group_jid_val}/metadata")
         assert isinstance(result, GetGroupMetadataResult)
-        assert result.response.data.jid == mock_group_metadata_api_data["jid"]
+        assert result.response.data.id == mock_group_metadata_api_data["id"]
 
     @pytest.mark.asyncio
     async def test_get_group_participants(self, async_client_groups_mocked_internals, mock_admin_participant_api_data, mock_rate_limit_info_dict):
         client = async_client_groups_mocked_internals
-        group_jid = "testgroup@g.us"
+        group_jid_val = "testgroup@g.us"
         api_participants_list = [mock_admin_participant_api_data]
         mock_response_payload = {"success": True, "message": "Group participants list", "data": api_participants_list}
         client._get_internal.return_value = {"response": mock_response_payload, "rate_limit": mock_rate_limit_info_dict}
 
-        result: GetGroupParticipantsResult = await client.get_group_participants(group_jid=group_jid)
+        result: GetGroupParticipantsResult = await client.get_group_participants(group_jid=group_jid_val)
 
-        client._get_internal.assert_called_once_with(f"/groups/{group_jid}/participants")
+        client._get_internal.assert_called_once_with(f"/groups/{group_jid_val}/participants")
         assert isinstance(result, GetGroupParticipantsResult)
         assert len(result.response.data) == 1
+        assert result.response.data[0].id == mock_admin_participant_api_data["id"]
+        assert result.response.data[0].admin == mock_admin_participant_api_data["admin"]
 
     @pytest.mark.asyncio
     async def test_add_group_participants(self, async_client_groups_mocked_internals, mock_rate_limit_info_dict):
         client = async_client_groups_mocked_internals
-        group_jid = "testgroup@g.us"
+        group_jid_val = "testgroup@g.us"
         participants_to_add = ["participant1@s.whatsapp.net", "participant2@s.whatsapp.net"]
         action_status_api_data = [{"status": 200, "jid": p, "message": "added"} for p in participants_to_add]
         mock_response_payload = {"success": True, "message": "Participants added", "data": action_status_api_data}
         client._post_internal.return_value = {"response": mock_response_payload, "rate_limit": mock_rate_limit_info_dict}
 
         payload_model = ModifyGroupParticipantsPayload(participants=participants_to_add)
-        result: ModifyGroupParticipantsResult = await client.add_group_participants(group_jid=group_jid, participants=participants_to_add)
+        result: ModifyGroupParticipantsResult = await client.add_group_participants(group_jid=group_jid_val, participants=participants_to_add)
 
-        client._post_internal.assert_called_once_with(
-            f"/groups/{group_jid}/participants/add",
-            payload_model.model_dump(by_alias=True)
-        )
+        client._post_internal.assert_called_once_with(f"/groups/{group_jid_val}/participants/add", payload_model.model_dump())
         assert isinstance(result, ModifyGroupParticipantsResult)
         assert len(result.response.data) == len(participants_to_add)
+        assert result.response.data[0].jid == participants_to_add[0]
 
     @pytest.mark.asyncio
     async def test_remove_group_participants(self, async_client_groups_mocked_internals, mock_rate_limit_info_dict):
         client = async_client_groups_mocked_internals
-        group_jid = "testgroup@g.us"
+        group_jid_val = "testgroup@g.us"
         participants_to_remove = ["participant1@s.whatsapp.net"]
         action_status_api_data = [{"status": 200, "jid": p, "message": "removed"} for p in participants_to_remove]
         mock_response_payload = {"success": True, "message": "Participants removed", "data": action_status_api_data}
         client._post_internal.return_value = {"response": mock_response_payload, "rate_limit": mock_rate_limit_info_dict}
 
         payload_model = ModifyGroupParticipantsPayload(participants=participants_to_remove)
-        result: ModifyGroupParticipantsResult = await client.remove_group_participants(group_jid=group_jid, participants=participants_to_remove)
+        result: ModifyGroupParticipantsResult = await client.remove_group_participants(group_jid=group_jid_val, participants=participants_to_remove)
 
-        client._post_internal.assert_called_once_with(
-            f"/groups/{group_jid}/participants/remove",
-            payload_model.model_dump(by_alias=True)
-        )
+        client._post_internal.assert_called_once_with(f"/groups/{group_jid_val}/participants/remove", payload_model.model_dump())
         assert isinstance(result, ModifyGroupParticipantsResult)
+        assert result.response.data[0].message == "removed"
+        assert result.response.data[0].jid == participants_to_remove[0]
 
     @pytest.mark.asyncio
     async def test_update_group_settings(self, async_client_groups_mocked_internals, mock_rate_limit_info_dict):
         client = async_client_groups_mocked_internals
-        group_jid = "testgroup@g.us"
+        group_jid_val = "testgroup@g.us"
         settings_to_update = UpdateGroupSettingsPayload(subject="New Group Subject", announce=True)
-        updated_settings_api_data = {"subject": "New Group Subject", "description": None, "announce": True, "restrict": None}
+
+        updated_settings_api_data = {"subject": "New Group Subject", "description": None}
         mock_response_payload = {"success": True, "message": "Settings updated", "data": updated_settings_api_data}
         client._put_internal.return_value = {"response": mock_response_payload, "rate_limit": mock_rate_limit_info_dict}
 
-        result: UpdateGroupSettingsResult = await client.update_group_settings(group_jid=group_jid, settings=settings_to_update)
+        result: UpdateGroupSettingsResult = await client.update_group_settings(group_jid=group_jid_val, settings=settings_to_update)
 
-        client._put_internal.assert_called_once_with(
-            f"/groups/{group_jid}/settings",
-            settings_to_update.model_dump(by_alias=True, exclude_none=True)
-        )
+        client._put_internal.assert_called_once_with(f"/groups/{group_jid_val}/settings", settings_to_update.model_dump(exclude_none=True))
         assert isinstance(result, UpdateGroupSettingsResult)
-        assert result.response.data.subject == "New Group Subject"
+        assert result.response.data.subject == settings_to_update.subject
 
 # Client method tests will be added after this class.
 # The old TestAPIResponseDataStructures, TestAPISuccessResponseTypes, TestResultTypes should be removed. 
