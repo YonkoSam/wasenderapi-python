@@ -1,13 +1,16 @@
 import json
 import time
+import asyncio # Added for async operations
 from typing import Optional, Dict, Any, Union, List, TypeVar, Generic, Callable
-import requests
+import httpx # Added for async HTTP requests
 from urllib.parse import urlencode
+from ._version import __version__ as SDK_VERSION # Import from _version.py
 from .models import (
     BaseMessage,
     WasenderSuccessResponse,
     RateLimitInfo,
-    WasenderSendResult
+    WasenderSendResult,
+    RetryConfig
 )
 from .errors import WasenderAPIError
 from .webhook import (
@@ -46,17 +49,6 @@ from .sessions import (
 )
 from pydantic import TypeAdapter
 
-SDK_VERSION = "0.1.0"
-
-class RetryConfig:
-    def __init__(
-        self,
-        max_retries: Optional[int] = 0,
-        enabled: Optional[bool] = False
-    ):
-        self.max_retries = max_retries
-        self.enabled = enabled
-
 class WebhookRequestAdapter:
     def __init__(self, headers: Dict[str, str], body: str):
         self.headers = headers
@@ -68,33 +60,49 @@ class WebhookRequestAdapter:
     def get_raw_body(self) -> str:
         return self.body
 
-class WasenderClient:
+class WasenderAsyncClient:
     def __init__(
         self,
         api_key: str,
         base_url: str = "https://www.wasenderapi.com/api",
-        fetch_implementation: Optional[Callable] = None,
         retry_options: Optional[RetryConfig] = None,
         webhook_secret: Optional[str] = None,
-        personal_access_token: Optional[str] = None
+        personal_access_token: Optional[str] = None,
+        http_client: Optional[httpx.AsyncClient] = None # Added for custom async client
     ):
         if not api_key:
             raise ValueError("WASENDER_API_KEY is required to initialize the Wasender SDK.")
 
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
-        self.fetch_impl = fetch_implementation or requests.request
-        self.retry_config = RetryConfig(
-            max_retries=retry_options.max_retries if retry_options else 0,
-            enabled=retry_options.enabled if retry_options else False
-        )
+        self.retry_config = retry_options if retry_options is not None else RetryConfig()
         self.webhook_secret = webhook_secret
         self.personal_access_token = personal_access_token
+        self._http_client = http_client
+        self._created_http_client = False
 
-        if not self.fetch_impl:
-            raise ValueError("Fetch implementation is not available. Please ensure 'requests' is installed or provide a custom fetch_implementation.")
+    async def __aenter__(self):
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient()
+            self._created_http_client = True
+        return self
 
-    def _parse_rate_limit_headers(self, headers: Dict[str, str]) -> RateLimitInfo:
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._created_http_client and self._http_client:
+            await self._http_client.aclose()
+
+    @property
+    def http_client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            # This case should ideally be handled by __aenter__ if used as a context manager
+            # Or the user should provide a client instance or manage its lifecycle.
+            # For direct instantiation without 'async with', we create one but it won't be closed automatically.
+            # Consider warning the user or requiring 'async with' for proper resource management.
+            self._http_client = httpx.AsyncClient()
+            self._created_http_client = True # Mark as created so it can be closed if __aexit__ is somehow called
+        return self._http_client
+
+    def _parse_rate_limit_headers(self, headers: httpx.Headers) -> RateLimitInfo:
         limit = headers.get("X-RateLimit-Limit")
         remaining = headers.get("X-RateLimit-Remaining")
         reset = headers.get("X-RateLimit-Reset")
@@ -134,15 +142,15 @@ class WasenderClient:
             if isinstance(location_payload.get("longitude"), str):
                 location_payload["longitude"] = float(location_payload["longitude"])
 
-        request_options = {
+        request_kwargs = {
             "method": method,
-            "headers": headers,
-            "url": url
+            "url": url,
+            "headers": headers
         }
 
         if method in ["POST", "PUT"]:
             headers["Content-Type"] = "application/json"
-            request_options["json"] = processed_body or {}
+            request_kwargs["json"] = processed_body or {}
 
         attempts = 0
         rate_limit_info: Optional[RateLimitInfo] = None
@@ -150,10 +158,7 @@ class WasenderClient:
         while True:
             attempts += 1
             try:
-                if self.fetch_impl == requests.request:
-                    raw_response = self.fetch_impl(method=method, url=url, headers=headers, json=request_options.get("json"))
-                else:
-                    raw_response = await self.fetch_impl(url, request_options)
+                raw_response = await self.http_client.request(**request_kwargs)
                 
                 if method == "POST" and path == "/send-message":
                     rate_limit_info = self._parse_rate_limit_headers(raw_response.headers)
@@ -178,9 +183,9 @@ class WasenderClient:
                         response_dict["rate_limit"] = rate_limit_info
                     return response_dict
 
-                response_body = await raw_response.json()
+                response_body = raw_response.json()
 
-                if not raw_response.ok:
+                if not raw_response.is_success:
                     error_response_data = response_body
                     raise WasenderAPIError(
                         message=error_response_data.get("message", "API request failed"),
@@ -196,12 +201,12 @@ class WasenderClient:
                     response_dict["rate_limit"] = rate_limit_info
                 return response_dict
 
-            except requests.exceptions.RequestException as e:
+            except httpx.RequestError as e:
                 if attempts > self.retry_config.max_retries:
                     raise WasenderAPIError(message=f"Network error: {str(e)}", status_code=None) from e
                 if not self.retry_config.enabled:
                     raise WasenderAPIError(message=f"Network error: {str(e)}", status_code=None) from e
-                time.sleep(1)
+                await asyncio.sleep(1) # Use asyncio.sleep for async
 
             except json.JSONDecodeError as e:
                 raise WasenderAPIError(
@@ -226,43 +231,84 @@ class WasenderClient:
         result = await self._post_internal("/send-message", payload.model_dump(by_alias=True))
         return WasenderSendResult(**result)
 
-    async def send_text(self, payload: Dict[str, Any]) -> WasenderSendResult:
-        payload['messageType'] = 'text'
+    async def send_text(self, to: str, text_body: str, **kwargs: Any) -> WasenderSendResult:
+        payload: Dict[str, Any] = {**kwargs}
+        payload["to"] = to
+        payload["messageType"] = "text"
+        payload["text"] = {"body": text_body}
         result = await self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
-    async def send_image(self, payload: Dict[str, Any]) -> WasenderSendResult:
-        payload['messageType'] = 'image'
+    async def send_image(self, to: str, url: str, caption: Optional[str] = None, **kwargs: Any) -> WasenderSendResult:
+        payload: Dict[str, Any] = {**kwargs}
+        payload["to"] = to
+        payload["messageType"] = "image"
+        image_payload = {"url": url}
+        if caption:
+            image_payload["caption"] = caption
+        payload["image"] = image_payload
         result = await self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
-    async def send_video(self, payload: Dict[str, Any]) -> WasenderSendResult:
-        payload['messageType'] = 'video'
+    async def send_video(self, to: str, url: str, caption: Optional[str] = None, **kwargs: Any) -> WasenderSendResult:
+        payload: Dict[str, Any] = {**kwargs}
+        payload["to"] = to
+        payload["messageType"] = "video"
+        video_payload = {"url": url}
+        if caption:
+            video_payload["caption"] = caption
+        payload["video"] = video_payload
         result = await self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
-    async def send_document(self, payload: Dict[str, Any]) -> WasenderSendResult:
-        payload['messageType'] = 'document'
+    async def send_document(self, to: str, url: str, filename: str, caption: Optional[str] = None, **kwargs: Any) -> WasenderSendResult:
+        payload: Dict[str, Any] = {**kwargs}
+        payload["to"] = to
+        payload["messageType"] = "document"
+        document_payload = {"url": url, "filename": filename}
+        if caption:
+            document_payload["caption"] = caption
+        payload["document"] = document_payload
         result = await self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
-    async def send_audio(self, payload: Dict[str, Any]) -> WasenderSendResult:
-        payload['messageType'] = 'audio'
+    async def send_audio(self, to: str, url: str, **kwargs: Any) -> WasenderSendResult:
+        payload: Dict[str, Any] = {k: v for k, v in kwargs.items() if k != 'ptt'}
+        payload["to"] = to
+        payload["messageType"] = "audio"
+        audio_payload = {"url": url}
+        if "ptt" in kwargs:
+            audio_payload["ptt"] = kwargs["ptt"]
+        payload["audio"] = audio_payload
         result = await self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
-    async def send_sticker(self, payload: Dict[str, Any]) -> WasenderSendResult:
-        payload['messageType'] = 'sticker'
+    async def send_sticker(self, to: str, url: str, **kwargs: Any) -> WasenderSendResult:
+        payload: Dict[str, Any] = {**kwargs}
+        payload["to"] = to
+        payload["messageType"] = "sticker"
+        payload["sticker"] = {"url": url}
         result = await self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
-    async def send_contact(self, payload: Dict[str, Any]) -> WasenderSendResult:
-        payload['messageType'] = 'contact'
+    async def send_contact(self, to: str, contact_name: str, contact_phone_number: str, **kwargs: Any) -> WasenderSendResult:
+        payload: Dict[str, Any] = {**kwargs}
+        payload["to"] = to
+        payload["messageType"] = "contact"
+        payload["contact"] = {"name": contact_name, "phoneNumber": contact_phone_number}
         result = await self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
-    async def send_location(self, payload: Dict[str, Any]) -> WasenderSendResult:
-        payload['messageType'] = 'location'
+    async def send_location(self, to: str, latitude: float, longitude: float, name: Optional[str] = None, address: Optional[str] = None, **kwargs: Any) -> WasenderSendResult:
+        payload: Dict[str, Any] = {**kwargs}
+        payload["to"] = to
+        payload["messageType"] = "location"
+        location_payload = {"latitude": latitude, "longitude": longitude}
+        if name:
+            location_payload["name"] = name
+        if address:
+            location_payload["address"] = address
+        payload["location"] = location_payload
         result = await self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
 
@@ -381,32 +427,32 @@ class WasenderClient:
         except Exception as e:
             raise WasenderAPIError(f"Invalid webhook event data: {str(e)}", status_code=400) from e
 
-def create_wasender(
+def create_async_wasender(
     api_key: str,
     base_url: Optional[str] = None,
-    fetch_implementation: Optional[Callable] = None,
     retry_options: Optional[RetryConfig] = None,
     webhook_secret: Optional[str] = None,
-    personal_access_token: Optional[str] = None
-) -> WasenderClient:
-    """Create a new instance of the WasenderClient.
+    personal_access_token: Optional[str] = None,
+    http_client: Optional[httpx.AsyncClient] = None # Added for custom async client
+) -> WasenderAsyncClient:
+    """Create a new instance of the WasenderAsyncClient.
 
     Args:
         api_key: Your Wasender API key
         base_url: Optional custom base URL for the API
-        fetch_implementation: Optional custom HTTP client implementation
         retry_options: Optional retry configuration
         webhook_secret: Optional webhook secret for verifying webhook requests
         personal_access_token: Optional personal access token for authentication
+        http_client: Optional custom httpx.AsyncClient instance.
 
     Returns:
-        A new WasenderClient instance
+        A new WasenderAsyncClient instance
     """
-    return WasenderClient(
+    return WasenderAsyncClient(
         api_key=api_key,
         base_url=base_url or "https://www.wasenderapi.com/api",
-        fetch_implementation=fetch_implementation,
         retry_options=retry_options,
         webhook_secret=webhook_secret,
-        personal_access_token=personal_access_token
-    ) 
+        personal_access_token=personal_access_token,
+        http_client=http_client
+    )

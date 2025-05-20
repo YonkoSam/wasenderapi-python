@@ -13,40 +13,35 @@ This document explains how to receive and process webhook events from Wasender u
 
 ## Processing Incoming Webhooks with the SDK
 
-The Wasender Python SDK provides a `client.handle_webhook_event()` method to simplify webhook processing. This method performs two key actions:
+The Wasender Python SDK provides a `client.handle_webhook_event()` method (available on both `WasenderAsyncClient` and `WasenderSyncClient`) to simplify webhook processing. This method performs two key actions:
 
-1.  **Signature Verification:** It verifies the incoming request using the `webhook_secret` you provide and the signature sent by Wasender (typically in an `x-webhook-signature` or similar header).
+1.  **Signature Verification:** It verifies the incoming request using the `webhook_secret` (configured on the client instance) and the signature sent by Wasender (typically in an `x-webhook-signature` or similar header).
 2.  **Event Parsing:** If the signature is valid, it parses the request body into a typed `WasenderWebhookEvent` Pydantic model.
 
 ### Using `client.handle_webhook_event()`
 
-The method signature is:
+For `WasenderAsyncClient`, the method signature is:
 ```python
 async def handle_webhook_event(
     self,
-    headers: Dict[str, str],
-    raw_body: bytes, # Important: use raw bytes of the body
-    webhook_secret: str,
-    signature_header_name: str = "x-webhook-signature", # Default, can be overridden
-    timestamp_header_name: str = "x-webhook-timestamp" # Default, can be overridden if your provider uses it
+    request_body_bytes: bytes, # Raw request body as bytes
+    signature_header: Optional[str] # Value of the signature header (e.g., X-Wasender-Signature)
 ) -> WasenderWebhookEvent:
     # ... implementation details ...
 ```
+*(The `WasenderSyncClient` also has an `async def handle_webhook_event` with the same signature, which might be unexpected for a sync client. For webhook handling in an async framework like Flask/FastAPI, using `WasenderAsyncClient` is generally more natural.)*
 
-To use it, you need to:
-1.  Obtain the dictionary of request headers from your web framework.
+To use it (example with `WasenderAsyncClient`):
+1.  Initialize your `WasenderAsyncClient` (or `WasenderSyncClient`) with your `api_key` and `webhook_secret`.
 2.  Obtain the **raw request body as bytes** from your web framework. It is critical to use the raw body *before* any JSON parsing by your framework's middlewares for accurate signature verification.
-3.  Provide your `webhook_secret`.
-4.  (Optional) If your webhook provider uses different header names for the signature or an included timestamp (for replay attack prevention), you can specify `signature_header_name` and `timestamp_header_name`.
+3.  Obtain the value of the signature header (e.g., `X-Wasender-Signature`) from the request headers.
 
 The method returns a parsed `WasenderWebhookEvent` object on success or raises a `WasenderAPIError` if:
-*   The `webhook_secret` is invalid or not provided to the method.
-*   The signature header is missing.
-*   The signature is invalid (status code 401 will be in the error).
+*   The `webhook_secret` is not configured on the client or is invalid.
+*   The signature header is missing or the signature is invalid (status code 401 or 400 will be in the error).
 *   The request body cannot be read or parsed correctly as JSON after signature verification.
-*   A timestamp is provided in headers and is outside the acceptable tolerance window (to prevent replay attacks).
 
-**Important:** Your `WasenderClient` instance itself does **not** need to be initialized with the webhook secret. The secret is passed directly to the `handle_webhook_event` method when a webhook request is being processed.
+**Important:** The `webhook_secret` **must be provided during client initialization** (e.g., to `create_async_wasender`) for `handle_webhook_event` to work, as it uses `self.webhook_secret`.
 
 ## Webhook Event Structure in Python
 
@@ -135,24 +130,25 @@ The `type` property (an instance of `WasenderWebhookEventType` enum) indicates t
 
 ## Detailed Python Webhook Handler Example (Flask)
 
-This example demonstrates handling webhooks using **Flask**. Similar principles apply to FastAPI, Django, or other Python web frameworks.
+This example demonstrates handling webhooks using **Flask** with `WasenderAsyncClient`.
 
 ```python
 # app.py (Example Flask Webhook Handler)
 import os
 import logging
+import asyncio # Required for running async client methods in Flask
 from flask import Flask, request, jsonify
-from typing import Dict
+from typing import Dict, Optional # Optional for signature_header
 
-from wasenderapi import WasenderClient
+# Corrected imports
+from wasenderapi import create_async_wasender, WasenderAsyncClient
 from wasenderapi.errors import WasenderAPIError
 from wasenderapi.models.webhook import (
     WasenderWebhookEvent,
     WasenderWebhookEventType,
-    MessageCreatedEvent, # Assuming this is a defined specific event model
-    SessionStatusEvent,  # Assuming this is a defined specific event model
-    # Import other specific event types you want to handle explicitly
-    # e.g., from wasenderapi.models.webhook_events import MessagesUpsertEvent, MessagesUpdateEvent
+    # Assuming these specific event types are correctly defined in your SDK:
+    # from wasenderapi.models.webhook_events import MessageCreatedEvent, SessionStatusEvent
+    # For the example, we'll rely on isinstance checks or access common fields.
 )
 
 # Configure logging
@@ -162,114 +158,113 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app
 app = Flask(__name__)
 
-# Initialize WasenderClient (API key and Persona Token might not be needed for just webhook handling)
-# However, if your webhook handler also needs to make API calls, initialize client fully.
-# For this example, we only need a client instance to access handle_webhook_event.
-# The actual API calls within the handler would require a properly authenticated client.
-wasender_client = WasenderClient(api_key="YOUR_DUMMY_API_KEY_IF_ONLY_HANDLING_WEBHOOKS") # Or your actual API key
-
-# Get webhook secret from environment variable
+# --- SDK Initialization ---
+API_KEY = os.getenv("WASENDER_API_KEY", "YOUR_FALLBACK_API_KEY") # Fallback for local dev if needed
 WEBHOOK_SECRET = os.getenv("WASENDER_WEBHOOK_SECRET")
 
 if not WEBHOOK_SECRET:
     logger.error("CRITICAL: WASENDER_WEBHOOK_SECRET environment variable not set.")
     # In a real app, you might want to prevent startup or handle this more gracefully
 
-@app.route("/wasender-webhook", methods=["POST"])
-async def handle_wasender_webhook():
-    if not WEBHOOK_SECRET:
-        logger.error("Webhook secret not configured. Rejecting request.")
-        return jsonify({"error": "Webhook secret not configured"}), 500
+# Initialize WasenderAsyncClient with webhook_secret
+# The API key might be needed if you intend to make API calls from within the webhook handler.
+# If only verifying and parsing, a dummy API key might suffice if your client requires one.
+async_wasender_client = create_async_wasender(
+    api_key=API_KEY, 
+    webhook_secret=WEBHOOK_SECRET
+)
 
-    # Get headers as a dictionary
-    headers_dict: Dict[str, str] = {k.lower(): v for k, v in request.headers.items()}
-    
+@app.route("/wasender-webhook", methods=["POST"])
+async def handle_wasender_webhook(): # Flask allows async routes
+    if not async_wasender_client.webhook_secret: # Check if client has secret
+        logger.error("Webhook secret not configured on client. Rejecting request.")
+        return jsonify({"error": "Webhook secret not configured on client"}), 500
+
+    # Get signature header (ensure your header name matches what Wasender sends)
+    # Common names: "x-wasender-signature", "x-webhook-signature", "x-hub-signature-256"
+    signature: Optional[str] = request.headers.get("X-Wasender-Signature") 
+    # Or adapt to the actual header name used by Wasender API
+
     # Get raw body as bytes
     raw_body: bytes = request.get_data()
 
     try:
-        logger.info(f"Received webhook. Headers: {headers_dict}, Body (first 100 bytes): {raw_body[:100]}...")
+        logger.info(f"Received webhook. Signature Header: {signature}, Body (first 100 bytes): {raw_body[:100]}...")
         
         # Process the webhook event using the SDK
-        webhook_event: WasenderWebhookEvent = await wasender_client.handle_webhook_event(
-            headers=headers_dict,
-            raw_body=raw_body,
-            webhook_secret=WEBHOOK_SECRET
-            # signature_header_name="x-wasender-signature" # If your provider uses a different header
-        )
+        # Ensure the client is used in an async context if it manages an HTTP client internally
+        async with async_wasender_client: # Use async context manager if client makes internal http calls or needs setup/teardown
+            webhook_event: WasenderWebhookEvent = await async_wasender_client.handle_webhook_event(
+                request_body_bytes=raw_body,
+                signature_header=signature
+            )
 
         logger.info(f"Successfully verified and parsed webhook. Event Type: {webhook_event.type.value}")
 
         # Handle the event based on its type
-        # Using match statement (Python 3.10+)
-        match webhook_event.type:
-            case WasenderWebhookEventType.MESSAGE_CREATED: # Or the exact enum member from your SDK
-                # Ensure webhook_event is narrowed to the correct type if possible, or access data carefully
-                # For example, if your SDK uses a Union that Pydantic resolves:
-                if isinstance(webhook_event, MessageCreatedEvent):
-                    message_data = webhook_event.data.message
-                    logger.info(f"New message from {message_data.from_number}: {message_data.text}")
-                    # Add your business logic here (e.g., save to DB, send auto-reply)
-                else:
-                    logger.warning(f"Received MESSAGE_CREATED but model was {type(webhook_event)}. Data: {webhook_event.data}")
-            
-            case WasenderWebhookEventType.SESSION_STATUS:
-                if isinstance(webhook_event, SessionStatusEvent):
-                    status_data = webhook_event.data
-                    logger.info(f"Session status update for session {webhook_event.session_id}: {status_data.status}")
-                    if status_data.status == "NEED_SCAN":
-                        logger.info("Action: QR code needs to be scanned for the session.")
-                    # Add your logic for session status changes
-                else:
-                    logger.warning(f"Received SESSION_STATUS but model was {type(webhook_event)}. Data: {webhook_event.data}")
+        # (Using if/elif for broader Python compatibility in docs, match is 3.10+)
+        event_type_value = webhook_event.type.value
 
-            # Add more cases for other WasenderWebhookEventType members you care about
-            # e.g., WasenderWebhookEventType.MESSAGES_UPSERT, WasenderWebhookEventType.MESSAGES_UPDATE etc.
-            
-            case _:
-                logger.info(f"Received an unhandled webhook event type: {webhook_event.type.value}")
-                logger.info(f"Unhandled event data: {webhook_event.data.model_dump_json(indent=2) if hasattr(webhook_event.data, 'model_dump_json') else webhook_event.data}")
+        if event_type_value == WasenderWebhookEventType.MESSAGE_CREATED.value: # Compare enum values
+            # Accessing data safely (assuming data is a Pydantic model)
+            # Actual specific event model (e.g., MessageCreatedEvent) should be used for type safety if available
+            message_info = webhook_event.data.get("message") if isinstance(webhook_event.data, dict) else getattr(webhook_event.data, "message", None)
+            if message_info:
+                from_number = message_info.get("from") if isinstance(message_info, dict) else getattr(message_info, "from_number", None)
+                text_content = message_info.get("text") if isinstance(message_info, dict) else getattr(message_info, "text", None)
+                logger.info(f"New message from {from_number}: {text_content}")
+            else:
+                logger.warning(f"Message data not found in expected structure for MESSAGE_CREATED. Data: {webhook_event.data}")
+        
+        elif event_type_value == WasenderWebhookEventType.SESSION_STATUS.value:
+            status_info = webhook_event.data.get("status") if isinstance(webhook_event.data, dict) else getattr(webhook_event.data, "status", None)
+            session_id = webhook_event.session_id # Access common field from BaseWebhookEvent
+            logger.info(f"Session status update for session {session_id}: {status_info}")
+            if status_info == WhatsAppSessionStatus.NEED_SCAN.value:
+                logger.info("Action: QR code needs to be scanned for the session.")
+        
+        # Add more elif blocks for other WasenderWebhookEventType members
+
+        else:
+            logger.info(f"Received an unhandled webhook event type: {event_type_value}")
+            # data_dump = webhook_event.data.model_dump_json(indent=2) if hasattr(webhook_event.data, 'model_dump_json') else str(webhook_event.data)
+            # logger.info(f"Unhandled event data: {data_dump}")
 
         # Always respond with a 2xx status code to acknowledge receipt
-        return jsonify({"status": "success", "event_type_received": webhook_event.type.value}), 200
+        return jsonify({"status": "success", "event_type_received": event_type_value}), 200
 
     except WasenderAPIError as e:
         logger.error(f"WasenderAPIError processing webhook: {e.message} (Status: {e.status_code})")
-        # Respond with an appropriate error status based on the error type
-        # e.g., 401 for signature mismatch, 400 for bad request
         return jsonify({"error": e.message, "details": e.api_message}), e.status_code or 400
     
     except Exception as e:
         logger.error(f"Generic error processing webhook: {e}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
 
+async def main(): # Added async main for running the app with an async server if needed
+    # This part is for running Flask with an ASGI server like Hypercorn or Uvicorn
+    # For simplicity in docs, we often show `app.run()`, but for async routes, ASGI is better.
+    # Example: hypercorn app:app
+    # If using app.run(), ensure it's compatible with async routes or use Flask-Async.
+    pass
+
 if __name__ == "__main__":
     if not WEBHOOK_SECRET:
-        print("ERROR: The WASENDER_WEBHOOK_SECRET environment variable must be set to run this Flask app.")
-        print("Please set it and try again. Example: export WASENDER_WEBHOOK_SECRET='your_secret_here'")
+        print("ERROR: The WASENDER_WEBHOOK_SECRET environment variable must be set.")
     else:
-        print(f"Webhook secret loaded. Starting Flask server on http://localhost:5000/wasender-webhook")
-        # For production, use a proper WSGI server like Gunicorn or uWSGI
-        # Example: gunicorn -w 4 -k uvicorn.workers.UvicornWorker app:app
-        app.run(debug=True, port=5000) # debug=True is not for production
-
+        logger.info("Flask app ready. Run with an ASGI server like Uvicorn or Hypercorn for async routes.")
+        logger.info("Example: uvicorn app:app --host 0.0.0.0 --port 5000")
+        # For development only, Flask's built-in server (not for production):
+        # app.run(debug=True, port=5000) 
 ```
 
-**Explanation of the Flask Example:**
-
-1.  **Imports:** Relevant modules from Flask, `wasenderapi`, and standard libraries.
-2.  **Flask App & Client:** Initializes the Flask app and a `WasenderClient` instance. The client doesn't strictly need full API credentials if it's *only* used for `handle_webhook_event`, but if your handler needs to make calls back to the Wasender API (e.g., to fetch more details or send a reply), it should be fully initialized.
-3.  **Webhook Secret:** Fetches the `WEBHOOK_SECRET` from an environment variable. This is crucial for security.
-4.  **Route (`/wasender-webhook`):** Defines a POST endpoint to receive webhooks.
-5.  **Get Headers and Raw Body:** Retrieves all request headers and the raw body (`request.get_data()`) as bytes. This is vital for the SDK's signature verification.
-6.  **Call `handle_webhook_event`:** Passes the `headers`, `raw_body`, and `WEBHOOK_SECRET` to the SDK method.
-7.  **Event Handling (`match webhook_event.type`):**
-    *   Uses a `match` statement (Python 3.10+) to process different event types. For older Python versions, use `if/elif/else` on `webhook_event.type.value`.
-    *   Inside each case, it's good practice to check the actual instance type (e.g., `isinstance(webhook_event, MessageCreatedEvent)`) if your `WasenderWebhookEvent` is a broad `Union` and Pydantic has resolved it to a specific type. This gives you type safety when accessing `webhook_event.data`.
-    *   The `data` attribute of the event object will be an instance of the specific Pydantic model for that event (e.g., `MessageCreatedData`).
-8.  **Acknowledge Receipt:** Responds with a `200 OK` status and a JSON body to acknowledge successful receipt and processing. If an error occurs, it responds with an appropriate HTTP error code (e.g., 400, 401, 500).
-9.  **Error Handling:** Catches `WasenderAPIError` (e.g., for signature failures) and generic exceptions.
-10. **Running the Flask App:** The `if __name__ == "__main__":` block shows how to run the development server. For production, a proper WSGI server should be used.
+### Key Steps in the Flask Example:
+1.  **SDK Initialization:** Initialize `WasenderAsyncClient` with your `api_key` and `webhook_secret`.
+2.  **Signature Header:** Obtain the signature header from the request headers.
+3.  **Raw Body:** Obtain the raw body as bytes from the request.
+4.  **Event Processing:** Use the `handle_webhook_event` method to process the event.
+5.  **Event Handling:** Handle the event based on its type.
+6.  **Response:** Respond with a 2xx status code to acknowledge successful receipt and processing.
 
 **Important Security Note:**
 

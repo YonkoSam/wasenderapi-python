@@ -6,7 +6,7 @@ This document provides examples for managing WhatsApp groups using the Wasender 
 
 ## Prerequisites
 
-1.  **Install Python:** Ensure Python (3.7+) is installed on your system.
+1.  **Install Python:** Ensure Python (3.8+) is installed on your system.
 2.  **Obtain a Wasender API Key:** You'll need an API key from [https://www.wasenderapi.com](https://www.wasenderapi.com).
 3.  **SDK Installation:** Install the Wasender Python SDK using pip:
     ```bash
@@ -15,7 +15,7 @@ This document provides examples for managing WhatsApp groups using the Wasender 
 
 ## Initializing the SDK
 
-All examples assume you have initialized the `WasenderClient` as follows. You can place this in a central part of your application or at the beginning of your script.
+All examples assume you have initialized the SDK. The examples in this document primarily use an asynchronous client.
 
 ```python
 # group_examples_setup.py
@@ -26,25 +26,30 @@ import json
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
-from wasenderapi import WasenderClient, RetryConfig
+# Corrected imports for client and RetryConfig
+from wasenderapi import create_async_wasender, WasenderAsyncClient # For type hinting
 from wasenderapi.errors import WasenderAPIError
 from wasenderapi.models import (
+    RetryConfig, # RetryConfig is now from models
     # General
     RateLimitInfo,
-    SimpleStatusResponse, # For generic success/message responses
+    # WasenderSuccessResponse, # Renamed/updated from SimpleStatusResponse if applicable
     # Message Payloads & Results
-    TextPayload,
+    TextOnlyMessage, # Assuming this is used for sending text to groups
     WasenderSendResult,
-    # Group Specific Models
-    Group,
+    # Group Specific Models from wasenderapi.groups
+    BasicGroupInfo, # Used in GetAllGroupsResult
     GroupMetadata,
-    GroupParticipant, # Typically part of GroupMetadata or its own list
-    ModifyParticipantStatus, # Individual status within ModifyParticipantsResult
-    ModifyParticipantsResult, # Overall result for add/remove/promote/demote
-    UpdateGroupSettingsPayload,
-    GroupSettingsUpdateResult,
-    GroupLeaveResult # Assuming a specific model or using SimpleStatusResponse
-    # Ensure these model names match your wasenderapi/models.py
+    GroupParticipant,
+    ModifyGroupParticipantsPayload, # For request payloads
+    UpdateGroupSettingsPayload,   # For request payloads
+    # Group Specific Result Models from wasenderapi.groups
+    GetAllGroupsResult,
+    GetGroupMetadataResult,
+    GetGroupParticipantsResult,
+    ModifyGroupParticipantsResult, # Wraps list of ParticipantActionStatus
+    UpdateGroupSettingsResult,
+    # ParticipantActionStatus # Sub-model in ModifyGroupParticipantsResult
 )
 
 # Configure basic logging for examples
@@ -52,30 +57,38 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- SDK Initialization ---
-api_key = os.getenv("WASENDER_API_KEY") # API Key for the session whose groups are being managed.
-# The personal_access_token is primarily for account-level session management (create/list/delete sessions).
-# It's not typically required for group operations within an existing session if the api_key is for that session.
-personal_access_token = os.getenv("WASENDER_PERSONAL_ACCESS_TOKEN") # Optional, uncomment if needed for specific auth models or session selection.
+api_key = os.getenv("WASENDER_API_KEY")
+personal_access_token = os.getenv("WASENDER_PERSONAL_ACCESS_TOKEN") # Often needed for listing all sessions, etc.
 
 if not api_key:
-    logger.error("Error: WASENDER_API_KEY environment variable is not set.")
-    exit(1)
+    logger.error("Error: WASENDER_API_KEY environment variable not set.")
+    # For document generation, use a placeholder if not set, but real operations will fail.
+    api_key = "YOUR_API_KEY_PLACEHOLDER" 
 
-# Initialize client 
-# For group operations within an existing session, typically only the session's API key is needed.
-client = WasenderClient(api_key=api_key)
-# If personal_access_token is also needed for your specific auth model or for session selection:
-# # client = WasenderClient(api_key=api_key, personal_access_token=personal_access_token)
-logger.info("WasenderClient initialized for Group Management examples.")
+# Initialize async client using the factory function
+# Most group operations are on a specific session, identified by api_key.
+# If PAT is needed for specific group-related endpoints (e.g. listing groups across all accounts - unlikely), pass it.
+async_client = create_async_wasender(api_key=api_key, personal_access_token=personal_access_token)
+
+logger.info(f"WasenderAsyncClient initialized for Group Management examples (API Key: {api_key[:4]}...)")
+
+# Example of initializing with retry options (if desired)
+# retry_config_groups = RetryConfig(enabled=True, max_retries=2)
+# async_client_with_retries_groups = create_async_wasender(
+#     api_key=api_key,
+#     personal_access_token=personal_access_token,
+#     retry_options=retry_config_groups
+# )
 
 # --- Placeholders for Testing ---
 # Replace with a valid group JID (e.g., "1234567890-1234567890@g.us")
 EXAMPLE_GROUP_JID = "1234567890-1234567890@g.us" # DO NOT COMMIT REAL JIDs
-# Replace with valid E.164 phone numbers for participants (without '+')
-PARTICIPANT_JIDS_TO_ADD = ["19876543210", "19876543211"]
-PARTICIPANT_JID_TO_REMOVE = "19876543210" # Example: single remove
-PARTICIPANT_JID_TO_PROMOTE = "19876543211"
-PARTICIPANT_JID_TO_DEMOTE = "19876543210"
+# Replace with valid participant JIDs (e.g., "PHONE_NUMBER@s.whatsapp.net")
+# The client methods for groups (add/remove participants) expect a list of JIDs.
+PARTICIPANT_JIDS_TO_ADD = ["19876543210@s.whatsapp.net", "19876543211@s.whatsapp.net"]
+PARTICIPANT_JID_TO_REMOVE = "19876543210@s.whatsapp.net"
+PARTICIPANT_JID_TO_PROMOTE = "19876543211@s.whatsapp.net"
+PARTICIPANT_JID_TO_DEMOTE = "19876543210@s.whatsapp.net"
 
 # --- Generic Error Handler for Group Examples ---
 def handle_group_api_error(error: Exception, operation: str):
@@ -142,17 +155,9 @@ if __name__ == "__main__":
     logger.info("To run examples, uncomment calls in main() and ensure JIDs are correctly set.")
     logger.info("Then, you can run: asyncio.run(main()) after adjusting placeholder checks if needed.")
 
-```
-
-**Note:**
-*   Replace `[Specify Python SDK Version Here, e.g., 0.1.0]` with your Python SDK version.
-*   Ensure `WASENDER_API_KEY` (for the session performing group operations) is set. The `WASENDER_PERSONAL_ACCESS_TOKEN` is generally not required for these operations but is used for managing the sessions themselves.
-*   Update `EXAMPLE_GROUP_JID` and other participant JIDs with actual, valid JIDs from a test WhatsApp account and group before running any examples, especially modifying operations. **Do not commit real JIDs to version control.**
-*   The Pydantic models (e.g., `Group`, `GroupMetadata`, `ModifyParticipantsResult`) should match your SDK's `wasenderapi/models.py`.
-
 ## Group Management Operations
 
-Below are examples of common group management tasks. These functions assume `client`, `logger`, `handle_group_api_error`, `log_rate_limit_info`, `EXAMPLE_GROUP_JID`, and relevant Pydantic models are available from a setup similar to the one shown above.
+Below are examples of common group management tasks. These functions assume `async_client`, `logger`, `handle_group_api_error`, `log_rate_limit_info`, `EXAMPLE_GROUP_JID`, and relevant Pydantic models are available from a setup similar to the one shown above.
 
 ### 1. Get All Groups
 
@@ -160,11 +165,15 @@ Retrieves a list of all WhatsApp groups the connected account is part of.
 
 ```python
 # Example: Get All Groups
-async def get_all_groups_example():
+async def get_all_groups_example(client: WasenderAsyncClient):
     logger.info("\n--- Fetching All Groups ---")
+    if client.api_key == "YOUR_API_KEY_PLACEHOLDER":
+        logger.warning("Skipping API call for get_all_groups: API key is a placeholder.")
+        return
     try:
-        result = await client.get_groups() # Returns WasenderResponse[List[Group]]
-        groups: List[Group] = result.response.data
+        # result is now directly GetAllGroupsResult, not nested WasenderResponse
+        result: GetAllGroupsResult = await client.get_groups()
+        groups: List[BasicGroupInfo] = result.response.data
         
         logger.info(f"Successfully retrieved {len(groups)} groups.")
         if groups:
@@ -186,27 +195,33 @@ Uses the standard `client.send()` method. The `to` field in the message payload 
 
 ```python
 # Example: Send Text Message to a Group
-async def send_message_to_group_example(group_jid: str, message_text: str):
+async def send_message_to_group_example(client: WasenderAsyncClient, group_jid: str, message_text: str):
     logger.info(f"\n--- Sending Message to Group: {group_jid} ---")
+    if client.api_key == "YOUR_API_KEY_PLACEHOLDER":
+        logger.warning(f"Skipping API call for send_message_to_group {group_jid}: API key is a placeholder.")
+        return
     if not group_jid:
         logger.error("Group JID is required.")
         return
 
-    text_payload = TextPayload(
+    text_payload = TextOnlyMessage(
         to=group_jid,
-        text=message_text,
+        text_body=message_text,
     ) # message_type defaults to "text" if not set in TextPayload
 
     try:
         # Assuming client.send() returns WasenderResponse[WasenderSendResult]
-        result = await client.send(payload=text_payload)
-        send_result: WasenderSendResult = result.response.data
+        response: WasenderSendResult = await client.send_text(
+            to=group_jid, 
+            text_body=message_text
+        )
+        send_result: WasenderSendResult = response.response.data
         
         logger.info(f"Group message sent. Message ID: {send_result.message_id}, Status: {send_result.status}")
         if send_result.detail:
              logger.info(f"Detail: {send_result.detail}")
         
-        log_rate_limit_info(result.rate_limit)
+        log_rate_limit_info(response.rate_limit)
             
     except Exception as e:
         handle_group_api_error(e, f"sending message to group {group_jid}")
@@ -220,14 +235,18 @@ Retrieves detailed metadata for a specific group, including subject, description
 
 ```python
 # Example: Get Group Metadata
-async def get_group_metadata_example(group_jid: str):
+async def get_group_metadata_example(client: WasenderAsyncClient, group_jid: str):
     logger.info(f"\n--- Fetching Metadata for Group: {group_jid} ---")
+    if client.api_key == "YOUR_API_KEY_PLACEHOLDER":
+        logger.warning(f"Skipping API call for get_group_metadata {group_jid}: API key is a placeholder.")
+        return
     if not group_jid:
         logger.error("Group JID is required.")
         return
 
     try:
-        result = await client.get_group_metadata(group_jid=group_jid) # Returns WasenderResponse[GroupMetadata]
+        # result is now directly GetGroupMetadataResult
+        result: GetGroupMetadataResult = await client.get_group_metadata(group_jid=group_jid)
         metadata: GroupMetadata = result.response.data
         
         logger.info(f"Group metadata for {group_jid}:")
@@ -251,8 +270,11 @@ While `get_group_metadata` includes participants, if there's a dedicated endpoin
 
 ```python
 # Example: Get Group Participants (if a dedicated endpoint exists)
-async def get_group_participants_example(group_jid: str):
+async def get_group_participants_example(client: WasenderAsyncClient, group_jid: str):
     logger.info(f"\n--- Fetching Participants for Group: {group_jid} (using dedicated endpoint) ---")
+    if client.api_key == "YOUR_API_KEY_PLACEHOLDER":
+        logger.warning(f"Skipping API call for get_group_participants {group_jid}: API key is a placeholder.")
+        return
     if not group_jid:
         logger.error("Group JID is required.")
         return
@@ -263,7 +285,7 @@ async def get_group_participants_example(group_jid: str):
         # participants: List[GroupParticipant] = result.response.data
         
         # For demonstration, we'll use get_group_metadata as it usually contains participants
-        metadata_result = await client.get_group_metadata(group_jid=group_jid)
+        metadata_result: GetGroupMetadataResult = await client.get_group_metadata(group_jid=group_jid)
         participants: List[GroupParticipant] = metadata_result.response.data.participants or []
 
         logger.info(f"Retrieved {len(participants)} participants for group {group_jid}.")
@@ -286,27 +308,23 @@ Adds one or more participants to a group. Requires admin privileges in the group
 
 ```python
 # Example: Add Participants to Group
-async def add_participants_to_group_example(group_jid: str, participant_jids: List[str]):
+async def add_participants_to_group_example(client: WasenderAsyncClient, group_jid: str, participant_jids: List[str]):
     logger.info(f"\n--- Adding Participants to Group: {group_jid} ---")
+    if client.api_key == "YOUR_API_KEY_PLACEHOLDER":
+        logger.warning(f"Skipping API call for add_participants_to_group {group_jid}: API key is a placeholder.")
+        return
     if not group_jid or not participant_jids:
         logger.error("Group JID and a list of participant JIDs are required.")
         return
     
     logger.info(f"Attempting to add: {participant_jids}")
     try:
-        # Assumes client.add_group_participants returns WasenderResponse[ModifyParticipantsResult]
-        result = await client.add_group_participants(group_jid=group_jid, participant_jids=participant_jids)
-        mod_result: ModifyParticipantsResult = result.response.data
-        
-        logger.info("Add participants operation result:")
-        if mod_result.message: # General message for the operation
-            logger.info(f"  Message: {mod_result.message}")
-        if mod_result.statuses: # Detailed status per participant
-            for status in mod_result.statuses:
-                logger.info(f"  JID: {status.jid}, Status: {status.status}, Message: {status.message or 'N/A'}")
-        else: # Fallback if structure is simpler
-             logger.info(f"  Raw data: {mod_result.model_dump_json(indent=2)}")
-
+        # result is now directly ModifyGroupParticipantsResult
+        result: ModifyGroupParticipantsResult = await client.add_group_participants(
+            group_jid=group_jid, 
+            participants=participant_jids
+        )
+        logger.info(f"Add participants call completed for group {group_jid}.")
 
         log_rate_limit_info(result.rate_limit)
 

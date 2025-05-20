@@ -2,7 +2,7 @@ import pytest
 import json # Added json for client.handle_webhook_event body
 # Unittest.mock and requests might not be needed if client tests are fully removed
 # from unittest.mock import Mock, patch 
-from wasenderapi.client import WasenderClient # Client import for testing its handle_webhook_event
+from wasenderapi import create_async_wasender # Import the factory function
 from wasenderapi.errors import WasenderAPIError # For asserting exceptions from client
 from wasenderapi.webhook import (
     verify_wasender_webhook_signature,
@@ -36,9 +36,17 @@ def make_req_for_client_test(body: Dict[str, Any], signature: str = None) -> Moc
 # def webhook_handler(): ...
 
 @pytest.fixture
-def client_for_webhook_tests():
+async def client_for_webhook_tests(): # Make fixture async for async client setup/teardown if needed
     # Minimal client, only needs webhook_secret for these tests
-    return WasenderClient(api_key="test_api_key_for_webhook", webhook_secret=SECRET)
+    # Use create_async_wasender and ensure it can be used in a non-async-with context for these tests if http_client is not strictly needed
+    # or manage its lifecycle if it is.
+    # For handle_webhook_event, an actual HTTP client isn't used, so direct instantiation is fine.
+    client = create_async_wasender(api_key="test_api_key_for_webhook", webhook_secret=SECRET)
+    # If create_async_wasender requires being used in an async context manager for internal client setup:
+    # async with create_async_wasender(api_key="test_api_key_for_webhook", webhook_secret=SECRET) as client:
+    #     yield client
+    # However, handle_webhook_event doesn't make HTTP calls, so direct instantiation without context should be okay.
+    yield client # Yield if we need to ensure cleanup, though not strictly necessary for this client's usage here
 
 class TestWebhookSignatureVerification:
     def test_rejects_missing_signature(self):

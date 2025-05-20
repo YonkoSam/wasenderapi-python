@@ -1,37 +1,34 @@
 import pytest
-from unittest.mock import Mock, AsyncMock
-from wasenderapi.client import WasenderClient, SDK_VERSION
+from unittest.mock import AsyncMock, patch
+from wasenderapi import create_async_wasender, __version__ as SDK_VERSION
+from wasenderapi.models import RetryConfig, WasenderSendResult
 from wasenderapi.errors import WasenderAPIError
-from wasenderapi.models import WasenderSuccessResponse, RateLimitInfo, WasenderSendResult
 import json
+import httpx
 
 @pytest.fixture
-def mock_client():
-    client = WasenderClient("test_api_key")
-    client._request = AsyncMock()
+async def async_client_with_mocked_post():
+    retry_config_disabled = RetryConfig(enabled=False)
+    client = create_async_wasender("test_api_key", retry_options=retry_config_disabled)
+    client._post_internal = AsyncMock(name="_post_internal")
+    
+    mock_post_return_value = {
+        "response": {"success": True, "message": "ok", "data": {"messageId": "mock_message_id"}},
+        "rate_limit": {"limit": 1000, "remaining": 999, "reset_timestamp": 1620000000}
+    }
+    client._post_internal.return_value = mock_post_return_value
     return client
 
 @pytest.fixture
 def success_api_response_data():
-    return {"success": True, "message": "Message sent successfully"}
+    return {"success": True, "message": "Message sent successfully", "data": {"messageId": "test-message-id"}}
 
 @pytest.fixture
-def rate_limit_headers():
+def rate_limit_data():
     return {
-        "X-RateLimit-Limit": "1000",
-        "X-RateLimit-Remaining": "999",
-        "X-RateLimit-Reset": "1620000000"
-    }
-
-@pytest.fixture
-def mock_successful_request_return(success_api_response_data, rate_limit_headers):
-    return {
-        "response": success_api_response_data,
-        "rate_limit": {
-            "limit": int(rate_limit_headers["X-RateLimit-Limit"]),
-            "remaining": int(rate_limit_headers["X-RateLimit-Remaining"]),
-            "reset_timestamp": int(rate_limit_headers["X-RateLimit-Reset"])
-        }
+        "limit": 1000,
+        "remaining": 999,
+        "reset_timestamp": 1620000000
     }
 
 @pytest.fixture
@@ -39,154 +36,205 @@ def error_api_response_data():
     return {
         "success": False, 
         "message": "Invalid phone number format", 
-        "errors": {"to": ["The 'to' field is invalid."]}
+        "errors": [{"field": "to", "message": "The 'to' field is invalid."}]
     }
-
-@pytest.fixture
-def client_with_mocked_fetch():
-    mock_fetch = AsyncMock()
-    client = WasenderClient("test_api_key", fetch_implementation=mock_fetch)
-    return client, mock_fetch
 
 @pytest.mark.asyncio
-async def test_sends_text_payload_with_correct_headers(client_with_mocked_fetch):
-    client, mock_fetch = client_with_mocked_fetch
+async def test_send_text_constructs_correct_payload_and_calls_post_internal(async_client_with_mocked_post):
+    client = async_client_with_mocked_post
+    
+    test_to = "+1234567890"
+    test_body = "Hello Wasender!"
 
-    mock_api_response = AsyncMock()
-    mock_api_response.status_code = 200
-    mock_api_response.ok = True
-    mock_api_response.headers = {
-        "X-RateLimit-Limit": "1000",
-        "X-RateLimit-Remaining": "999",
-        "X-RateLimit-Reset": "1620000000"
+    expected_message_id_val = "specific_test_msg_id_text"
+    client._post_internal.return_value = {
+        "response": {"success": True, "message": "Text sent", "data": {"messageId": expected_message_id_val}},
+        "rate_limit": {"limit": 100, "remaining": 99, "reset_timestamp": 1670000000}
     }
-    success_payload = {"success": True, "message": "ok"}
-    mock_api_response.json = AsyncMock(return_value=success_payload)
-    mock_api_response.text = json.dumps(success_payload)
 
-    mock_fetch.return_value = mock_api_response
+    response: WasenderSendResult = await client.send_text(to=test_to, text_body=test_body, custom_param="test_val")
 
-    payload_to_send = {"to": "+123", "text": "yo"}
-    response: WasenderSendResult = await client.send_text(payload_to_send)
-
-    mock_fetch.assert_called_once()
+    client._post_internal.assert_called_once()
     
-    called_url, called_options_dict = mock_fetch.call_args.args
-
-    assert called_options_dict.get('method') == "POST"
-    assert called_url == "https://www.wasenderapi.com/api/send-message"
+    args, kwargs = client._post_internal.call_args
     
-    expected_headers = {
-        "Accept": "application/json",
-        "User-Agent": f"wasenderapi-python-sdk/{SDK_VERSION}",
-        "Authorization": "Bearer test_api_key",
-        "Content-Type": "application/json"
+    assert args[0] == "/send-message"
+    
+    expected_payload = {
+        "to": test_to,
+        "messageType": "text",
+        "text": {"body": test_body},
+        "custom_param": "test_val"
     }
-    assert called_options_dict.get('headers') == expected_headers
-
-    expected_body = {"to": "+123", "text": "yo", "messageType": "text"}
-    assert called_options_dict.get('json') == expected_body
+    assert args[1] == expected_payload
     
-    assert response.response.success == True
-    assert response.response.message == "ok"
-    assert response.rate_limit.limit == 1000
-    assert response.rate_limit.remaining == 999
+    assert response.response.success is True
+    assert response.response.message == "Text sent"
+    assert response.response.data.message_id == expected_message_id_val
+    assert response.rate_limit.limit == 100
+    assert response.rate_limit.remaining == 99
 
 @pytest.mark.asyncio
-async def test_send_image(mock_client, mock_successful_request_return, success_api_response_data):
-    mock_client._request.return_value = mock_successful_request_return
+async def test_send_image(async_client_with_mocked_post, success_api_response_data, rate_limit_data):
+    client = async_client_with_mocked_post
+    client._post_internal.return_value = {
+        "response": success_api_response_data,
+        "rate_limit": rate_limit_data
+    }
     
-    payload = {"to": "1234567890", "imageUrl": "https://example.com/image.jpg", "text": "Test image"}
-    response = await mock_client.send_image(payload)
+    test_to = "1234567890"
+    test_url = "https://example.com/image.jpg"
+    test_caption = "Test image"
+
+    response = await client.send_image(to=test_to, url=test_url, caption=test_caption)
         
-    mock_client._request.assert_called_once_with(
-        "POST", 
+    client._post_internal.assert_called_once_with(
         "/send-message", 
-        body={"to": "1234567890", "imageUrl": "https://example.com/image.jpg", "text": "Test image", "messageType": "image"}, 
-        use_personal_token=False
+        {
+            "to": test_to, 
+            "messageType": "image",
+            "image": {"url": test_url, "caption": test_caption}
+        }
     )
     assert response.response.success == True
     assert response.response.message == success_api_response_data["message"]
-    assert response.rate_limit.limit == 1000
+    assert response.rate_limit.limit == rate_limit_data["limit"]
 
 @pytest.mark.asyncio
-async def test_send_video(mock_client, mock_successful_request_return, success_api_response_data):
-    mock_client._request.return_value = mock_successful_request_return
+async def test_send_video(async_client_with_mocked_post, success_api_response_data, rate_limit_data):
+    client = async_client_with_mocked_post
+    client._post_internal.return_value = {
+        "response": success_api_response_data,
+        "rate_limit": rate_limit_data
+    }
     
-    payload = {"to": "1234567890", "videoUrl": "https://example.com/video.mp4", "text": "Test video"}
-    response = await mock_client.send_video(payload)
+    test_to = "1234567890"
+    test_url = "https://example.com/video.mp4"
+    test_caption = "Test video"
+
+    response = await client.send_video(to=test_to, url=test_url, caption=test_caption)
             
-    mock_client._request.assert_called_once_with(
-        "POST", 
+    client._post_internal.assert_called_once_with(
         "/send-message", 
-        body={"to": "1234567890", "videoUrl": "https://example.com/video.mp4", "text": "Test video", "messageType": "video"}, 
-        use_personal_token=False
+        {
+            "to": test_to, 
+            "messageType": "video",
+            "video": {"url": test_url, "caption": test_caption}
+        }
     )
     assert response.response.success == True
     assert response.response.message == success_api_response_data["message"]
 
 @pytest.mark.asyncio
-async def test_send_document(mock_client, mock_successful_request_return, success_api_response_data):
-    mock_client._request.return_value = mock_successful_request_return
+async def test_send_document(async_client_with_mocked_post, success_api_response_data, rate_limit_data):
+    client = async_client_with_mocked_post
+    client._post_internal.return_value = {
+        "response": success_api_response_data,
+        "rate_limit": rate_limit_data
+    }
     
-    payload = {"to": "1234567890", "documentUrl": "https://example.com/doc.pdf", "text": "Test document"}
-    response = await mock_client.send_document(payload)
+    test_to = "1234567890"
+    test_url = "https://example.com/doc.pdf"
+    test_filename = "Test Document.pdf"
+    test_caption = "Test document"
+
+    response = await client.send_document(to=test_to, url=test_url, filename=test_filename, caption=test_caption)
     
-    mock_client._request.assert_called_once_with(
-        "POST", 
+    client._post_internal.assert_called_once_with(
         "/send-message", 
-        body={"to": "1234567890", "documentUrl": "https://example.com/doc.pdf", "text": "Test document", "messageType": "document"}, 
-        use_personal_token=False
+        {
+            "to": test_to, 
+            "messageType": "document",
+            "document": {"url": test_url, "filename": test_filename, "caption": test_caption}
+        }
     )
     assert response.response.success == True
     assert response.response.message == success_api_response_data["message"]
 
 @pytest.mark.asyncio
-async def test_send_audio(mock_client, mock_successful_request_return, success_api_response_data):
-    mock_client._request.return_value = mock_successful_request_return
-    
-    payload = {"to": "1234567890", "audioUrl": "https://example.com/audio.mp3"}
-    response = await mock_client.send_audio(payload)
-    
-    mock_client._request.assert_called_once_with(
-        "POST", 
-        "/send-message", 
-        body={"to": "1234567890", "audioUrl": "https://example.com/audio.mp3", "messageType": "audio"}, 
-        use_personal_token=False
+async def test_send_audio(async_client_with_mocked_post, success_api_response_data, rate_limit_data):
+    client = async_client_with_mocked_post
+    test_to = "1234567890"
+    test_url = "https://example.com/audio.mp3"
+
+    # Test Case 1: ptt = False
+    client._post_internal.reset_mock() # Reset mock for a clean assertion
+    client._post_internal.return_value = {
+        "response": success_api_response_data,
+        "rate_limit": rate_limit_data
+    }
+    response_no_ptt = await client.send_audio(to=test_to, url=test_url, ptt=False)
+    client._post_internal.assert_called_once_with(
+        "/send-message",
+        {
+            "to": test_to,
+            "messageType": "audio",
+            "audio": {"url": test_url, "ptt": False}
+        }
     )
-    assert response.response.success == True
-    assert response.response.message == success_api_response_data["message"]
+    assert response_no_ptt.response.success is True
+
+    # Test Case 2: ptt = True
+    client._post_internal.reset_mock() # Reset mock for a clean assertion
+    # Update message_id for distinct response if necessary, though not asserted here
+    updated_success_data = {**success_api_response_data, "data": {**success_api_response_data["data"], "message_id": "mock_audio_ptt_true"}}
+    client._post_internal.return_value = {
+        "response": updated_success_data, # Use potentially updated data
+        "rate_limit": rate_limit_data
+    }
+    response_ptt = await client.send_audio(to=test_to, url=test_url, ptt=True)
+    client._post_internal.assert_called_once_with(
+        "/send-message",
+        {
+            "to": test_to,
+            "messageType": "audio",
+            "audio": {"url": test_url, "ptt": True}
+        }
+    )
+    assert response_ptt.response.success is True
 
 @pytest.mark.asyncio
-async def test_send_location(mock_client, mock_successful_request_return, success_api_response_data):
-    mock_client._request.return_value = mock_successful_request_return
+async def test_send_location(async_client_with_mocked_post, success_api_response_data, rate_limit_data):
+    client = async_client_with_mocked_post
+    client._post_internal.return_value = {
+        "response": success_api_response_data,
+        "rate_limit": rate_limit_data
+    }
     
-    payload = {"to": "1234567890", "location": {"latitude": 37.7749, "longitude": -122.4194, "name": "San Francisco"}}
-    response = await mock_client.send_location(payload)
+    test_to = "1234567890"
+    lat, lon = 37.7749, -122.4194
+    loc_name, loc_addr = "San Francisco HQ", "123 Main St"
+
+    response = await client.send_location(to=test_to, latitude=lat, longitude=lon, name=loc_name, address=loc_addr)
         
-    mock_client._request.assert_called_once_with(
-        "POST", 
+    client._post_internal.assert_called_once_with(
         "/send-message", 
-        body={"to": "1234567890", "location": {"latitude": 37.7749, "longitude": -122.4194, "name": "San Francisco"}, "messageType": "location"}, 
-        use_personal_token=False
+        {
+            "to": test_to, 
+            "messageType": "location",
+            "location": {"latitude": lat, "longitude": lon, "name": loc_name, "address": loc_addr}
+        }
     )
     assert response.response.success == True
     assert response.response.message == success_api_response_data["message"]
 
 @pytest.mark.asyncio
-async def test_api_error_raised(mock_client, error_api_response_data):
-    mock_client._request.side_effect = WasenderAPIError(
-        message=error_api_response_data["message"],
+async def test_api_error_raised_from_post_internal(async_client_with_mocked_post, error_api_response_data):
+    client = async_client_with_mocked_post
+    
+    original_api_message = error_api_response_data["message"]
+    original_error_details = error_api_response_data["errors"]
+
+    client._post_internal.side_effect = WasenderAPIError(
+        message=original_api_message,
         status_code=400,
-        api_message=error_api_response_data["message"],
-        error_details=error_api_response_data["errors"],
-        rate_limit=None,
-        retry_after=None
+        api_message=original_api_message,
+        error_details=original_error_details
     )
     
     with pytest.raises(WasenderAPIError) as exc_info:
-        await mock_client.send_text({"to": "invalid", "text": "Test message"})
+        await client.send_text(to="invalid_phone", text_body="Test error message")
     
     assert exc_info.value.status_code == 400
-    assert exc_info.value.api_message == error_api_response_data["message"]
-    assert exc_info.value.error_details == error_api_response_data["errors"] 
+    assert exc_info.value.api_message == original_api_message
+    assert exc_info.value.error_details == original_error_details 

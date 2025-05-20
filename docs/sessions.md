@@ -6,10 +6,10 @@ This document provides comprehensive examples for managing WhatsApp sessions usi
 
 ## Prerequisites
 
-1.  **Install Python:** Ensure Python (3.7+) is installed on your system.
+1.  **Install Python:** Ensure Python (3.8+) is installed on your system.
 2.  **Obtain a Wasender API Key & Personal Token:** 
     *   You'll need your main Wasender API key from [https://www.wasenderapi.com](https://www.wasenderapi.com).
-    *   For session management, a **Personal Access Token** is typically required. This token is associated with a specific token created under your account and is used to authorize operations on WhatsApp sessions . Ensure you have this token.
+    *   For session management, a **Personal Access Token** is typically required.
 3.  **SDK Installation:** Install the Wasender Python SDK using pip:
     ```bash
     pip install wasenderapi
@@ -17,9 +17,7 @@ This document provides comprehensive examples for managing WhatsApp sessions usi
 
 ## Initializing the SDK
 
-All examples assume SDK initialization as shown below. Note the use of both `api_key` (your main account API key) and `personal_access_token` for `WasenderClient` when dealing with session management. The `personal_access_token` is crucial for account-level operations like listing all sessions, creating new sessions, or deleting sessions.
-
-If you have a specific session's API key (obtained, for example, after creating a session that issues its own key, or if your `personal_access_token` itself is tied to a single session which then uses its parent account API key for operations), you might initialize the client with just that `api_key` for operations pertaining *only* to that specific, already-established session. However, the examples in this document primarily use the `personal_access_token` alongside the main `api_key` to demonstrate a broader range of session management capabilities that often require account-level permissions.
+All examples assume SDK initialization as shown below. Session management operations primarily use the `personal_access_token`.
 
 ```python
 # session_examples_setup.py
@@ -28,24 +26,32 @@ import os
 import logging
 import json
 from datetime import datetime
-from typing import List, Optional, Dict, Any # Ensure Dict, Any are used if needed
+from typing import List, Optional, Dict, Any
 
-from wasenderapi import WasenderClient, RetryConfig
+# Corrected imports for client and RetryConfig
+from wasenderapi import create_async_wasender, WasenderAsyncClient # For type hinting
 from wasenderapi.errors import WasenderAPIError
 from wasenderapi.models import (
-    # General
-    RateLimitInfo,
-    SimpleStatusResponse, # For generic success/message responses
-    # Session Specific Models
-    WhatsAppSession,      # For list items and detailed session info
+    RetryConfig, # RetryConfig is now from models
+    RateLimitInfo
+)
+# Import specific *Result and Payload models from wasenderapi.sessions
+from wasenderapi.sessions import (
+    WhatsAppSession,      # Core WhatsAppSession model
     CreateWhatsAppSessionPayload,
     UpdateWhatsAppSessionPayload,
-    WhatsAppSessionStatus,  # Enum for session states (e.g., CONNECTED, NEED_SCAN)
-    QRCodeData,           # For QR code string/image data
-    SessionConnectionStatus, # Detailed status of a session's connection
-    RegenerateApiKeyResponse, # Result of regenerating a session's API key
-    # Client methods will return WasenderResponse[SpecificModel] like WasenderResponse[WhatsAppSession]
-    # or WasenderResponse[List[WhatsAppSession]] or WasenderResponse[QRCodeData] etc.
+    WhatsAppSessionStatus,  # Enum for session states
+    # Result types for client methods
+    GetAllWhatsAppSessionsResult,
+    GetWhatsAppSessionDetailsResult,
+    CreateWhatsAppSessionResult,
+    UpdateWhatsAppSessionResult,
+    DeleteWhatsAppSessionResult,
+    ConnectSessionResult, # Contains SessionConnectionStatus or QRCodeData
+    GetQRCodeResult,      # Contains QRCodeData
+    DisconnectSessionResult, # Contains SessionConnectionStatus
+    RegenerateApiKeyResult,  # Contains RegenerateApiKeyResponse
+    GetSessionStatusResult    # Contains GetSessionStatusResponse (which has status field)
 )
 
 # Configure basic logging for examples
@@ -53,26 +59,31 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- SDK Initialization ---
-# IMPORTANT: Session management (listing, creating, deleting sessions) typically requires a Personal Access Token.
-# Operations on an *already existing and connected* session might sometimes be performed
-# using that session's specific API key, if applicable and distinct from the main account API key.
-api_key = os.getenv("WASENDER_API_KEY") # Your main account API Key
-personal_access_token = os.getenv("WASENDER_PERSONAL_ACCESS_TOKEN") # Token for account-level session operations
+api_key = os.getenv("WASENDER_API_KEY") # Your main account API Key (may not be used if PAT is primary)
+personal_access_token = os.getenv("WASENDER_PERSONAL_ACCESS_TOKEN")
 
-if not api_key or not personal_access_token:
-    logger.error(
-        "Error: WASENDER_API_KEY and WASENDER_PERSONAL_ACCESS_TOKEN environment variables must be set for session management."
-    )
-    exit(1)
+if not personal_access_token: # PAT is crucial for session management
+    logger.error("Error: WASENDER_PERSONAL_ACCESS_TOKEN environment variable must be set for session management.")
+    # For document generation, use a placeholder, but real operations will fail.
+    personal_access_token = "YOUR_PAT_PLACEHOLDER"
+if not api_key: # API key might still be needed by the base client or for some operations
+    api_key = "YOUR_API_KEY_PLACEHOLDER"
 
-# Initialize client with both API key and Personal Access Token for session operations
-# This setup is used for the examples below to cover a wide range of session management tasks.
-client = WasenderClient(api_key=api_key, personal_access_token=personal_access_token)
-logger.info("WasenderClient initialized for Session Management examples.")
+# Initialize async client with Personal Access Token for session operations
+async_client = create_async_wasender(api_key=api_key, personal_access_token=personal_access_token)
+logger.info(f"WasenderAsyncClient initialized for Session Management examples (PAT: {personal_access_token[:4]}...)")
 
-# Placeholder for a session ID created during tests
-# Note: In the Python SDK, session IDs are typically strings (UUIDs) not numbers.
-active_test_session_id: Optional[str] = None 
+# Example of initializing with retry options (if desired)
+# retry_config_sessions = RetryConfig(enabled=True, max_retries=2)
+# async_client_with_retries_sessions = create_async_wasender(
+#     api_key=api_key, 
+#     personal_access_token=personal_access_token,
+#     retry_options=retry_config_sessions
+# )
+
+# Placeholder for a session ID created/used during tests
+# Session IDs from the API are typically integers.
+active_test_session_id: Optional[int] = None 
 
 # --- Generic Error Handler for Session Examples ---
 def handle_session_api_error(error: Exception, operation: str):
@@ -110,7 +121,7 @@ async def run_all_session_examples():
     # 1. Get all sessions (and maybe pick one if none is active)
     await get_all_sessions_example()
     if not active_test_session_id:
-        sessions_response = await client.get_sessions() # Assuming client.get_sessions() is the Python method
+        sessions_response = await async_client.get_all_whatsapp_sessions() # Assuming client.get_all_whatsapp_sessions() is the Python method
         if sessions_response.response.data:
             active_test_session_id = sessions_response.response.data[0].id
             logger.info(f"Picked an existing session for some read-only tests: {active_test_session_id}")
@@ -139,7 +150,7 @@ async def run_all_session_examples():
         
         # 7. Disconnect session (if connected)
         # Check status first, only disconnect if actually connected to avoid errors
-        status_res = await client.get_session_connection_status(session_id=active_test_session_id)
+        status_res = await async_client.get_whatsapp_session_details(session_id=active_test_session_id)
         if status_res.response.data.status == WhatsAppSessionStatus.CONNECTED:
             await disconnect_session_example(active_test_session_id)
         else:
@@ -170,7 +181,7 @@ if __name__ == "__main__":
 
 ## Session Management Operations
 
-Below are examples of common session management tasks. These assume `client`, `logger`, `handle_session_api_error`, `log_rate_limit_info`, and relevant Pydantic models are available from a setup similar to `session_examples_setup.py`.
+Below are examples of common session management tasks. These assume `async_client`, `logger`, relevant Pydantic models, etc., are available from a setup similar to the one shown above.
 
 ### 1. Get All WhatsApp Sessions
 
@@ -179,11 +190,13 @@ Retrieves a list of all WhatsApp sessions linked to your Personal Access Token.
 ```python
 # Example: Get All WhatsApp Sessions
 async def get_all_sessions_example():
-    global active_test_session_id # Allow modification for orchestrator
+    global active_test_session_id
     logger.info("\n--- Fetching All WhatsApp Sessions ---")
+    if async_client.personal_access_token == "YOUR_PAT_PLACEHOLDER":
+        logger.warning("Skipping get_all_sessions: PAT is a placeholder.")
+        return
     try:
-        # Python SDK method: client.get_sessions()
-        result = await client.get_sessions() # Returns WasenderResponse[List[WhatsAppSession]]
+        result: GetAllWhatsAppSessionsResult = await async_client.get_all_whatsapp_sessions()
         sessions: List[WhatsAppSession] = result.response.data
         
         logger.info(f"Successfully retrieved {len(sessions)} sessions.")
@@ -229,8 +242,7 @@ async def create_session_example():
     
     logger.info(f"Creating session with payload: {payload.model_dump_json(indent=2)}")
     try:
-        # Python SDK method: client.create_session(payload)
-        result = await client.create_session(payload=payload) # Returns WasenderResponse[WhatsAppSession]
+        result: CreateWhatsAppSessionResult = await async_client.create_whatsapp_session(payload=payload)
         created_session: WhatsAppSession = result.response.data
         
         logger.info("Session created successfully:")
@@ -253,14 +265,13 @@ Retrieves details for a specific session by its ID.
 
 ```python
 # Example: Get WhatsApp Session Details
-async def get_session_details_example(session_id: str):
+async def get_session_details_example(session_id: int):
     logger.info(f"\n--- Fetching Details for Session ID: {session_id} ---")
     if not session_id:
         logger.error("Session ID is required.")
         return
     try:
-        # Python SDK method: client.get_session(session_id)
-        result = await client.get_session(session_id=session_id) # Returns WasenderResponse[WhatsAppSession]
+        result: GetWhatsAppSessionDetailsResult = await async_client.get_whatsapp_session_details(session_id=session_id)
         session_details: WhatsAppSession = result.response.data
         
         logger.info(f"Session details for {session_id}:")
@@ -280,7 +291,7 @@ Updates details (like name, webhook configuration) for an existing session.
 
 ```python
 # Example: Update WhatsApp Session
-async def update_session_example(session_id: str, new_name: str):
+async def update_session_example(session_id: int, new_name: str):
     logger.info(f"\n--- Updating Session ID: {session_id} ---")
     if not session_id:
         logger.error("Session ID is required.")
@@ -292,10 +303,9 @@ async def update_session_example(session_id: str, new_name: str):
         # webhook_url="https://my.updated.webhook.receiver/another-path", # Optional
         # webhook_events=["message.updated", "session.status", "group.participants.changed"], # Optional
     )
-    logger.info(f"Updating session with payload: {payload.model_dump_json(indent=2)}")
+    logger.info(f"Updating session with payload: {payload.model_dump_json(exclude_none=True, indent=2)}")
     try:
-        # Python SDK method: client.update_session(session_id, payload)
-        result = await client.update_session(session_id=session_id, payload=payload) # Returns WasenderResponse[WhatsAppSession]
+        result: UpdateWhatsAppSessionResult = await async_client.update_whatsapp_session(session_id=session_id, payload=payload)
         updated_session: WhatsAppSession = result.response.data
         
         logger.info(f"Session {session_id} updated successfully:")
@@ -315,27 +325,26 @@ Initiates the connection process for a session or retrieves an existing QR code 
 
 ```python
 # Example: Get Session QR Code
-async def get_session_qr_code_example(session_id: str, as_image_param: bool = False):
-    logger.info(f"\n--- Getting QR Code for Session ID: {session_id} (as_image={as_image_param}) ---")
+async def get_session_qr_code_example(session_id: int):
+    logger.info(f"\n--- Getting QR Code for Session ID: {session_id} ---")
     if not session_id:
         logger.error("Session ID is required.")
         return
 
     try:
-        # Python SDK method: client.get_session_qr_code(session_id, as_image=False)
-        # as_image=True might return a base64 image string or a link, depending on API
-        result = await client.get_session_qr_code(session_id=session_id, as_image=as_image_param) # Returns WasenderResponse[QRCodeData]
-        qr_data: QRCodeData = result.response.data
+        # Example: Request QR as a string (default)
+        result: GetQRCodeResult = await async_client.get_whatsapp_session_qr_code(session_id=session_id)
+        qr_code_data = result.response.data # This is QRCodeData model
         
-        logger.info(f"QR Code data received for session {session_id}:")
-        if qr_data.qr_code_string: # Typically the QR string for terminal display or library use
-            logger.info(f"  QR Code String (first 60 chars): {qr_data.qr_code_string[:60]}...")
-            logger.info("  ACTION REQUIRED: Scan this QR code string using a QR generator/display or directly if your terminal supports it.")
-        if qr_data.qr_code_image_base64: # If image requested and returned
-            logger.info(f"  QR Code Image (base64, first 60 chars): {qr_data.qr_code_image_base64[:60]}...")
-            logger.info("  ACTION REQUIRED: Decode base64 and display image to scan.")
-        if qr_data.status: # Some APIs might return current status alongside QR
-             logger.info(f"  Current session status reported: {qr_data.status}")
+        if qr_code_data and qr_code_data.qr_code:
+            logger.info(f"QR Code string received for session {session_id} (first 50 chars): {qr_code_data.qr_code[:50]}...")
+        else:
+            logger.warning(f"No QR code data received for session {session_id}.")
+        
+        # Example: Request QR as an image (if supported and needed)
+        # result_img: ConnectSessionResult = await client.connect_whatsapp_session(session_id=session_id, qr_as_image=True)
+        # if result_img.response.data.qr_code_image_url:
+        #     logger.info(f"QR Code Image URL: {result_img.response.data.qr_code_image_url}")
 
         log_rate_limit_info(result.rate_limit)
             
@@ -352,30 +361,29 @@ Retrieves the current connection status of a specific WhatsApp session (e.g., `C
 
 ```python
 # Example: Get Session Connection Status
-async def get_session_connection_status_example(session_id: str):
+async def get_session_connection_status_example(session_id: int):
     logger.info(f"\n--- Checking Connection Status for Session ID: {session_id} ---")
     if not session_id:
         logger.error("Session ID is required.")
         return
         
     try:
-        # Python SDK method: client.get_session_connection_status(session_id)
-        result = await client.get_session_connection_status(session_id=session_id) # Returns WasenderResponse[SessionConnectionStatus]
-        status_info: SessionConnectionStatus = result.response.data
-        
-        logger.info(f"Connection status for session {session_id}: {status_info.status}")
-        if status_info.message:
-            logger.info(f"  Message: {status_info.message}")
-        # Log the full status object for more details if needed
-        # logger.info(status_info.model_dump_json(indent=2))
+        # More robust: get details which include status
+        details_result: GetWhatsAppSessionDetailsResult = await async_client.get_whatsapp_session_details(session_id=session_id)
+        current_status = details_result.response.data.status
+        logger.info(f"Status for session {session_id}: {current_status.value if isinstance(current_status, WhatsAppSessionStatus) else current_status}")
+
+        # If there was a specific get_session_status(session_id: str) method for string IDs:
+        # result: GetSessionStatusResult = await client.get_session_status(session_id=str(session_id)) # Example cast
+        # logger.info(f"Connection status for session {session_id}: {result.response.status.value}") # Access .value for Enum
         
         # Example of using the WhatsAppSessionStatus enum
-        if status_info.status == WhatsAppSessionStatus.CONNECTED:
+        if current_status == WhatsAppSessionStatus.CONNECTED:
             logger.info("  Interpretation: Session is actively connected.")
-        elif status_info.status == WhatsAppSessionStatus.NEED_SCAN:
+        elif current_status == WhatsAppSessionStatus.NEED_SCAN:
             logger.info("  Interpretation: Session requires QR code scanning to connect.")
         
-        log_rate_limit_info(result.rate_limit)
+        log_rate_limit_info(details_result.rate_limit)
             
     except Exception as e:
         handle_session_api_error(e, f"checking connection status for session {session_id}")
@@ -406,26 +414,16 @@ Disconnects an active session by its ID. This logs the session out.
 
 ```python
 # Example: Disconnect WhatsApp Session
-async def disconnect_session_example(session_id: str):
+async def disconnect_session_example(session_id: int):
     logger.info(f"\n--- Disconnecting Session ID: {session_id} ---")
     if not session_id:
         logger.error("Session ID is required.")
         return
         
     try:
-        # Python SDK method: client.disconnect_session(session_id)
-        # Returns WasenderResponse[SimpleStatusResponse] or a specific disconnect result model
-        result = await client.disconnect_session(session_id=session_id) 
-        response_data = result.response.data # Type will depend on SDK's model for this
-        
-        logger.info(f"Disconnect session response for {session_id}:")
-        if hasattr(response_data, 'message') and response_data.message:
-            logger.info(f"  Message: {response_data.message}")
-        elif hasattr(response_data, 'status') and response_data.status:
-            logger.info(f"  Status: {response_data.status}")
-        else: # Fallback for unknown simple response structure
-            logger.info(f"  Response Data: {response_data}")
-
+        result: DisconnectSessionResult = await async_client.disconnect_whatsapp_session(session_id=session_id)
+        # DisconnectSessionResult.response.data is SessionConnectionStatus
+        logger.info(f"Disconnect operation for session {session_id} - Status: {result.response.data.status.value}, Message: {result.response.data.message}")
 
         log_rate_limit_info(result.rate_limit)
             
@@ -441,8 +439,8 @@ Regenerates the API key for a specific session. **Use with extreme caution, as t
 
 ```python
 # Example: Regenerate Session API Key
-async def regenerate_session_api_key_example(session_id: str):
-    logger.info(f"\n--- Regenerating API Key for Session ID: {session_id} ---")
+async def regenerate_session_api_key_example(session_id: int):
+    logger.warning(f"\n--- REGENERATING API KEY for Session ID: {session_id} (CAUTION!) ---")
     if not session_id:
         logger.error("Session ID is required.")
         return
@@ -450,20 +448,14 @@ async def regenerate_session_api_key_example(session_id: str):
     logger.warning(f"CAUTION: Regenerating the API key for session {session_id} will invalidate its current API key.")
     logger.warning("This operation is highly disruptive and usually not needed for standard workflows.")
     
-    # Add a small delay and confirmation step for safety in an example script
-    # In a real application, this would be a very deliberate, protected action.
-    # for i in range(5, 0, -1):
-    #     logger.info(f"Proceeding with API key regeneration in {i} seconds... (Press Ctrl+C to cancel)")
-    #     await asyncio.sleep(1)
-        
+    # Add a small delay and confirmation for safety in examples
+    logger.info("This is a destructive operation. Pausing for 5 seconds...")
+    await asyncio.sleep(5)
+    logger.info("Proceeding with API key regeneration...")
     try:
-        # Python SDK method: client.regenerate_session_api_key(session_id)
-        result = await client.regenerate_session_api_key(session_id=session_id) # Returns WasenderResponse[RegenerateApiKeyResponse]
-        regen_data: RegenerateApiKeyResponse = result.response.data
-        
-        logger.info(f"API Key regenerated successfully for session {session_id}.")
-        logger.info(f"  New Session API Key: {regen_data.api_key}")
-        logger.info("  IMPORTANT: You would need to use this new key for any subsequent direct API calls to this session instance if it had its own key.")
+        result: RegenerateApiKeyResult = await async_client.regenerate_api_key(session_id=session_id)
+        # RegenerateApiKeyResult.response is RegenerateApiKeyResponse model
+        logger.info(f"API Key regenerated for session {session_id}. New Key: {result.response.api_key}")
         
         log_rate_limit_info(result.rate_limit)
             
@@ -480,32 +472,21 @@ Deletes a specific session by its ID. **This action is irreversible and will rem
 
 ```python
 # Example: Delete WhatsApp Session
-async def delete_session_example(session_id: str):
-    logger.info(f"\n--- Deleting Session ID: {session_id} ---")
+async def delete_session_example(session_id: int):
+    logger.warning(f"\n--- DELETING Session ID: {session_id} (CAUTION!) ---")
     if not session_id:
         logger.error("Session ID is required.")
         return
         
     logger.warning(f"CAUTION: Deleting session {session_id} is irreversible!")
-    # Add a small delay and confirmation for safety in an example script
-    # for i in range(3, 0, -1):
-    #    logger.info(f"Proceeding with deletion in {i} seconds... (Press Ctrl+C to cancel)")
-    #    await asyncio.sleep(1)
-
+    # Add a small delay and confirmation for safety in examples
+    logger.info("This is a destructive operation. Pausing for 5 seconds...")
+    await asyncio.sleep(5)
+    logger.info("Proceeding with session deletion...")
     try:
-        # Python SDK method: client.delete_session(session_id)
-        # Returns WasenderResponse[SimpleStatusResponse] or similar confirming deletion
-        result = await client.delete_session(session_id=session_id) 
-        response_data = result.response.data
-        
-        logger.info(f"Session {session_id} deleted successfully.")
-        if hasattr(response_data, 'message') and response_data.message:
-            logger.info(f"  Message: {response_data.message}")
-        elif hasattr(response_data, 'status') and response_data.status:
-            logger.info(f"  Status: {response_data.status}")
-        else: # Fallback if data is None or a simple dict
-            logger.info(f"  Response Data: {response_data}")
-
+        result: DeleteWhatsAppSessionResult = await async_client.delete_whatsapp_session(session_id=session_id)
+        # DeleteWhatsAppSessionResult.response is WasenderSuccessResponse (data is None)
+        logger.info(f"Delete operation for session {session_id} - Success: {result.response.success}, Message: {result.response.message}")
 
         log_rate_limit_info(result.rate_limit)
             
@@ -523,7 +504,7 @@ async def delete_session_example(session_id: str):
     *   These are critical for authentication and authorization of session operations.
 
 2.  **Review `session_examples_setup.py` Block:**
-    *   Ensure the `WasenderClient` is initialized correctly. For the general session management examples shown, this uses both `api_key` and `personal_access_token`.
+    *   Ensure the `WasenderAsyncClient` is initialized correctly. For the general session management examples shown, this uses both `api_key` and `personal_access_token`.
     *   Verify that the Pydantic models listed (e.g., `WhatsAppSession`, `CreateWhatsAppSessionPayload`, `QRCodeData`, `SessionConnectionStatus`) match those in your `wasenderapi/models.py`.
 
 3.  **Understand the Orchestrator (`run_all_session_examples`)**:
@@ -538,7 +519,7 @@ async def delete_session_example(session_id: str):
 
 5.  **Testing Individual Examples:**
     *   Each example function (e.g., `create_session_example()`, `get_session_details_example(session_id)`) can also be called individually.
-    *   To do this, you would typically initialize the `client` (as in the setup block) and then use `asyncio.run(your_example_function_call())`. Make sure any required `session_id` is valid.
+    *   To do this, you would typically initialize the `async_client` (as in the setup block) and then use `asyncio.run(your_example_function_call())`. Make sure any required `session_id` is valid.
 
 **Best Practices for Testing Session Management:**
 

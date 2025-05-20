@@ -82,9 +82,20 @@ LocationMessage = LocationPinMessage
 ContactCard = ContactCardPayload
 LocationPin = LocationPinPayload
 
+class WasenderMessageSentData(BaseModel):
+    message_id: str = Field(alias="messageId")
+    status: Optional[str] = None # e.g., "PENDING", "SENT"
+    # Add other fields if the API returns more for a successful send
+
+# Define other potential data types for success responses if needed
+# class OtherSuccessData(BaseModel):
+#     some_field: str
+
 class WasenderSuccessResponse(BaseModel):
     success: bool = True
     message: str
+    # Make data a Union of possible successful data structures or Any
+    data: Optional[Union[WasenderMessageSentData, Dict[str, Any], List[Any], str, None]] = None
 
 class RateLimitInfo(BaseModel):
     limit: Optional[int] = None
@@ -95,6 +106,15 @@ class RateLimitInfo(BaseModel):
         if self.reset_timestamp:
             return datetime.fromtimestamp(self.reset_timestamp)
         return None
+
+class RetryConfig:
+    def __init__(
+        self,
+        max_retries: Optional[int] = 0,
+        enabled: Optional[bool] = False
+    ):
+        self.max_retries = max_retries
+        self.enabled = enabled
 
 class WasenderSendResult(BaseModel):
     response: WasenderSuccessResponse

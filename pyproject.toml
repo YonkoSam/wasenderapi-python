@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wasenderapi"
-version = "0.1.0"
+dynamic = ["version"]
 authors = [
     { name = "YonkoSam", email = "absamlani@gmail.com" },
 ]
@@ -46,4 +46,7 @@ dev = [
     "mypy>=1.0.0,<2.0.0",
     "ruff>=0.1.0,<0.2.0",
     "pre-commit>=3.0.0,<4.0.0"
-] 
+]
+
+[tool.hatch.version]
+path = "wasenderapi/_version.py" 
