@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
-from wasenderapi import create_async_wasender
+from wasenderapi import WasenderAsyncClient,create_async_wasender
 import json
 from wasenderapi.models import RateLimitInfo, WasenderSuccessResponse
 from wasenderapi.sessions import (
@@ -26,7 +26,7 @@ from pydantic import ValidationError
 
 @pytest.fixture
 def mock_client_with_async_fetch():
-    client = WasenderClient("test_api_key")
+    client = WasenderAsyncClient("test_api_key")
     client.fetch_impl = AsyncMock()
     return client
 
