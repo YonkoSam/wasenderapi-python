@@ -5,25 +5,33 @@ from pydantic import BaseModel, Field
 from .models import RateLimitInfo
 
 class WhatsAppSessionStatus(str, Enum):
-    CONNECTED = "CONNECTED"
-    DISCONNECTED = "DISCONNECTED"
-    NEED_SCAN = "NEED_SCAN"
-    CONNECTING = "CONNECTING"
-    LOGGED_OUT = "LOGGED_OUT"
-    EXPIRED = "EXPIRED"
+    CONNECTED = "connected"
+    DISCONNECTED = "disconnected"
+    NEED_SCAN = "need_scan"
+    CONNECTING = "connecting"
+    LOGGED_OUT = "logged_out"
+    EXPIRED = "expired"
 
 class WhatsAppSession(BaseModel):
     id: int
+    user_id: int = Field(..., alias="userId")
     name: str
     phone_number: str = Field(..., alias="phoneNumber")
     status: WhatsAppSessionStatus
+    api_key: str = Field(..., alias="apiKey")
+    session_data: dict = Field(..., alias="sessionData")
+    last_active_at: datetime = Field(..., alias="lastActiveAt")
     account_protection: bool = Field(..., alias="accountProtection")
     log_messages: bool = Field(..., alias="logMessages")
     webhook_url: Optional[str] = Field(None, alias="webhookUrl")
     webhook_enabled: bool = Field(..., alias="webhookEnabled")
     webhook_events: Optional[List[str]] = Field(None, alias="webhookEvents")
+    webhook_secret: str = Field(..., alias="webhookSecret")
     created_at: datetime = Field(..., alias="createdAt")
     updated_at: datetime = Field(..., alias="updatedAt")
+
+
+
 
 class CreateWhatsAppSessionPayload(BaseModel):
     name: str

@@ -60,7 +60,7 @@ def mock_api_response(mock_success_response_content, mock_rate_limit_headers):
 @pytest.fixture
 def mock_session_status_response_data():
     return {
-        "status": "CONNECTED"
+        "status": "connected"
     }
 
 @pytest.fixture
@@ -75,7 +75,7 @@ def mock_whatsapp_session_data():
         "id": 1,
         "name": "Business WhatsApp",
         "phoneNumber": "+1234567890",
-        "status": "CONNECTED",
+        "status": "connected",
         "accountProtection": True,
         "logMessages": True,
         "webhookUrl": "https://example.com/webhook",
@@ -96,17 +96,27 @@ def mock_rate_limit_info_dict():
 @pytest.fixture
 def mock_whatsapp_session_api_data():
     return {
-        "id": 1,
-        "name": "Business WhatsApp API",
-        "phoneNumber": "+1234567890",
-        "status": "CONNECTED",
-        "accountProtection": True,
-        "logMessages": True,
-        "webhookUrl": "https://example.com/webhook_api",
-        "webhookEnabled": True,
-        "webhookEvents": ["message", "group_update"],
-        "createdAt": "2025-04-01T12:00:00Z",
-        "updatedAt": "2025-05-08T15:30:00Z"
+            "id": 123,
+            "userId": 456,
+            "name": "Test Session",
+            "phoneNumber": "+1234567890",
+            "status": "connected",
+            "apiKey": "test_api_key_123",
+            "sessionData": {
+                "status_updated_at": "2025-01-01T12:00:00+00:00",
+                "status_info": {
+                    "status": "connected"
+                }
+            },
+            "lastActiveAt": "2025-01-01T12:00:00Z",
+            "createdAt": "2025-01-01T12:00:00Z",
+            "updatedAt": "2025-01-01T12:00:00Z",
+            "accountProtection": 1,
+            "logMessages": 1,
+            "webhookUrl": None,
+            "webhookEvents": [],
+            "webhookEnabled": False,
+            "webhookSecret": "test_webhook_secret_123"
     }
 
 @pytest.fixture
@@ -124,7 +134,7 @@ class TestSessionsClientMethods:
     async def test_get_session_status(self, async_client_sessions_mocked_internals, mock_rate_limit_info_dict):
         client = async_client_sessions_mocked_internals
         session_id_str = "session_123"
-        mock_api_response_data = {"status": "CONNECTED"}
+        mock_api_response_data = {"status": "connected"}
         
         client._get_internal.return_value = {
             "response": mock_api_response_data,
@@ -156,7 +166,7 @@ class TestSessionsClientMethods:
     async def test_disconnect_whatsapp_session(self, async_client_sessions_mocked_internals, mock_rate_limit_info_dict):
         client = async_client_sessions_mocked_internals
         session_id_int = 123
-        disconnect_data = {"status": "DISCONNECTED", "message": "Session logged out"}
+        disconnect_data = {"status": "disconnected", "message": "Session logged out"}
         mock_api_response_data = {"success": True, "message": "Logged out op", "data": disconnect_data}
         client._post_internal.return_value = {"response": mock_api_response_data, "rate_limit": mock_rate_limit_info_dict}
 
@@ -175,7 +185,7 @@ class TestSessionsClientMethods:
     async def test_connect_whatsapp_session(self, async_client_sessions_mocked_internals, mock_rate_limit_info_dict, qr_as_image_param, path_has_query_param):
         client = async_client_sessions_mocked_internals
         session_id_int = 123
-        connect_response_data = {"status": "CONNECTED", "message": "Session connected"}
+        connect_response_data = {"status": "connected", "message": "Session connected"}
         mock_api_response_data = {"success": True, "message": "Connection status", "data": connect_response_data}
         client._post_internal.return_value = {"response": mock_api_response_data, "rate_limit": mock_rate_limit_info_dict}
 
@@ -284,8 +294,8 @@ class TestSessionCoreModels:
         assert model.name == mock_whatsapp_session_api_data["name"]
         assert model.phone_number == mock_whatsapp_session_api_data["phoneNumber"]
         assert model.status == WhatsAppSessionStatus.CONNECTED
-        assert model.account_protection == mock_whatsapp_session_api_data["accountProtection"]
-        assert model.log_messages == mock_whatsapp_session_api_data["logMessages"]
+        assert model.account_protection is True
+        assert model.log_messages is True
         assert model.webhook_url == mock_whatsapp_session_api_data["webhookUrl"]
         assert model.webhook_enabled == mock_whatsapp_session_api_data["webhookEnabled"]
         assert model.webhook_events == mock_whatsapp_session_api_data["webhookEvents"]
@@ -298,26 +308,33 @@ class TestSessionCoreModels:
         dumped_model = model.model_dump(by_alias=True, mode='json')
         assert dumped_model["phoneNumber"] == mock_whatsapp_session_api_data["phoneNumber"]
         
-        # model_dump(mode='json') should serialize datetime to ISO string (typically with Z or offset)
-        # The input mock_whatsapp_session_api_data["createdAt"] is '2025-04-01T12:00:00Z'
-        # We need to ensure Pydantic's output matches this specific Z format or compare parsed datetimes.
-        # Forcing our model's datetime to the 'Z' format for comparison is safest if Pydantic's default differs.
-        
-        # Re-parse the dumped string and compare with the model's datetime attribute if exact string match is tricky.
-        # Or, compare against the original input string if Pydantic serializes to the same format.
         assert dumped_model["createdAt"] == mock_whatsapp_session_api_data["createdAt"]
         assert dumped_model["updatedAt"] == mock_whatsapp_session_api_data["updatedAt"]
 
-        required_fields = ["id", "name", "phoneNumber", "status", "accountProtection", "logMessages", "webhookEnabled", "createdAt", "updatedAt"]
-        for field_to_omit in required_fields:
+        model_fields = WhatsAppSession.model_fields.keys()
+
+        required_model_fields_for_validation_test = [
+            "id", "user_id", "name", "phone_number", "status", "api_key", "session_data",
+            "last_active_at", "account_protection", "log_messages", 
+            "webhook_enabled", "webhook_secret", "created_at", "updated_at"
+        ]
+
+        for field_name_snake_case in required_model_fields_for_validation_test:
+            field_info = WhatsAppSession.model_fields[field_name_snake_case]
+            api_key_to_omit = field_info.alias or field_name_snake_case
+
             bad_data = mock_whatsapp_session_api_data.copy()
-            del bad_data[field_to_omit]
-            with pytest.raises(ValidationError, match=field_to_omit):
+            if api_key_to_omit in bad_data:
+                del bad_data[api_key_to_omit]
+            else:
+                pass
+
+            with pytest.raises(ValidationError, match=rf"(^|\W){field_name_snake_case}(\W|$)|(^|\W){api_key_to_omit}(\W|$)"):
                  WhatsAppSession(**bad_data)
 
     def test_whatsapp_session_status_enum(self):
-        assert WhatsAppSessionStatus.CONNECTED.value == "CONNECTED"
-        assert WhatsAppSessionStatus.NEED_SCAN.value == "NEED_SCAN"
+        assert WhatsAppSessionStatus.CONNECTED.value == "connected"
+        assert WhatsAppSessionStatus.NEED_SCAN.value == "need_scan"
         with pytest.raises(ValueError):
             WhatsAppSessionStatus("INVALID_STATUS")
 
@@ -389,7 +406,7 @@ class TestSessionRequestPayloadModels:
 class TestSessionResultModels:
     def test_connect_session_result_model(self, mock_rate_limit_info_dict):
         # Case: Need Scan
-        need_scan_data = {"status": "NEED_SCAN", "qrCode": "base64string", "message": "Scan QR"}
+        need_scan_data = {"status": "need_scan", "qrCode": "base64string", "message": "Scan QR"}
         response_need_scan = {"success": True, "message": "Connect attempt", "data": need_scan_data}
         result_data_need_scan = {"response": response_need_scan, "rate_limit": mock_rate_limit_info_dict}
         model_need_scan = ConnectSessionResult(**result_data_need_scan)
@@ -398,7 +415,7 @@ class TestSessionResultModels:
         assert model_need_scan.rate_limit is not None
 
         # Case: Already Connected
-        connected_data = {"status": "CONNECTED", "message": "Already connected"}
+        connected_data = {"status": "connected", "message": "Already connected"}
         response_connected = {"success": True, "message": "Connect attempt", "data": connected_data}
         result_data_connected = {"response": response_connected}
         model_connected = ConnectSessionResult(**result_data_connected)
@@ -414,7 +431,7 @@ class TestSessionResultModels:
         assert model.response.data.qr_code == "base64qr"
 
     def test_disconnect_session_result_model(self, mock_rate_limit_info_dict):
-        disconnect_data = {"status": "DISCONNECTED", "message": "Logged out"}
+        disconnect_data = {"status": "disconnected", "message": "Logged out"}
         response = {"success": True, "message": "Disconnect op", "data": disconnect_data}
         result_data = {"response": response, "rate_limit": mock_rate_limit_info_dict}
         model = DisconnectSessionResult(**result_data)
@@ -431,7 +448,7 @@ class TestSessionResultModels:
         assert model.response.api_key == "newkey123"
 
     def test_get_session_status_result_model(self, mock_rate_limit_info_dict):
-        status_data = {"status": "CONNECTED"} # This is GetSessionStatusResponse structure
+        status_data = {"status": "connected"} # This is GetSessionStatusResponse structure
         # GetSessionStatusResult directly wraps GetSessionStatusResponse
         result_data = {"response": status_data, "rate_limit": mock_rate_limit_info_dict}
         model = GetSessionStatusResult(**result_data)
