@@ -51,7 +51,7 @@ EventType = TypeVar('EventType', bound=WasenderWebhookEventType)
 DataType = TypeVar('DataType')
 
 class BaseWebhookEvent(BaseModel, Generic[EventType, DataType]):
-    type: EventType
+    event: EventType
     timestamp: Optional[int] = None
     data: DataType
     session_id: Optional[str] = Field(None, alias="sessionId")
