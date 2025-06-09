@@ -187,6 +187,25 @@ class WasenderAsyncClient:
 
                 if not raw_response.is_success:
                     error_response_data = response_body
+                    
+                    # Handle rate limiting with retry logic
+                    if raw_response.status_code == 429:
+                        if self.retry_config.enabled and attempts <= self.retry_config.max_retries:
+                            # Get retry_after from response headers or body
+                            retry_after = None
+                            if 'Retry-After' in raw_response.headers:
+                                try:
+                                    retry_after = int(raw_response.headers['Retry-After'])
+                                except ValueError:
+                                    pass
+                            elif error_response_data.get("retry_after"):
+                                retry_after = error_response_data.get("retry_after")
+                            
+                            sleep_time = retry_after if retry_after is not None and retry_after > 0 else 1
+                            await asyncio.sleep(sleep_time)
+                            continue
+                    
+                    # If not rate limited or retries exhausted/disabled, raise the error
                     raise WasenderAPIError(
                         message=error_response_data.get("message", "API request failed"),
                         status_code=raw_response.status_code,
@@ -195,11 +214,19 @@ class WasenderAsyncClient:
                         rate_limit=rate_limit_info,
                         retry_after=error_response_data.get("retry_after")
                     )
-                
                 response_dict["response"] = response_body
                 if rate_limit_info:
                     response_dict["rate_limit"] = rate_limit_info
                 return response_dict
+
+            except WasenderAPIError as e:
+                # If it's a rate limit error and we can retry, handle it
+                if e.status_code == 429 and self.retry_config.enabled and attempts <= self.retry_config.max_retries:
+                    sleep_time = e.retry_after if e.retry_after is not None and e.retry_after > 0 else 1
+                    await asyncio.sleep(sleep_time)
+                    continue
+                else:
+                    raise
 
             except httpx.RequestError as e:
                 if attempts > self.retry_config.max_retries:
@@ -264,6 +291,7 @@ class WasenderAsyncClient:
         payload["to"] = to
         payload["messageType"] = "document"
         payload["documentUrl"] = url
+        payload["fileName"] = filename
         if caption:
             payload["text"] = caption
         result = await self._post_internal("/send-message", payload)
@@ -305,7 +333,25 @@ class WasenderAsyncClient:
         payload["location"] = location_payload
         result = await self._post_internal("/send-message", payload)
         return WasenderSendResult(**result)
-
+    
+    async def send_poll(self,
+        to: str,
+        question: str,
+        options: List[str],
+        is_multiple_choice: bool = False,
+    ) -> WasenderSendResult:
+        payload: Dict[str, Any] = {
+            "to": to,
+            "messageType": "poll",
+            "poll": {
+                "question": question,
+                "options": options,
+                "multiSelect": is_multiple_choice
+            }
+        }
+        result = await self._post_internal("/send-message", payload)
+        return WasenderSendResult(**result)
+    
     async def get_contacts(self) -> GetAllContactsResult:
         result = await self._get_internal("/contacts")
         return GetAllContactsResult(**result)

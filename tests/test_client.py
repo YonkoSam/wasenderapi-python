@@ -1,16 +1,32 @@
 import pytest
-from unittest.mock import AsyncMock, patch
-from wasenderapi import create_async_wasender, __version__ as SDK_VERSION
+from unittest.mock import AsyncMock, patch, Mock, MagicMock
+import time
+import asyncio
+from wasenderapi import create_async_wasender, create_sync_wasender, __version__ as SDK_VERSION
 from wasenderapi.models import RetryConfig, WasenderSendResult
 from wasenderapi.errors import WasenderAPIError
 import json
 import httpx
+import requests
 
 @pytest.fixture
 async def async_client_with_mocked_post():
     retry_config_disabled = RetryConfig(enabled=False)
     client = create_async_wasender("test_api_key", retry_options=retry_config_disabled)
     client._post_internal = AsyncMock(name="_post_internal")
+    
+    mock_post_return_value = {
+        "response": {"success": True, "message": "ok", "data": {"messageId": "mock_message_id"}},
+        "rate_limit": {"limit": 1000, "remaining": 999, "reset_timestamp": 1620000000}
+    }
+    client._post_internal.return_value = mock_post_return_value
+    return client
+
+@pytest.fixture
+def sync_client_with_mocked_post():
+    retry_config_disabled = RetryConfig(enabled=False)
+    client = create_sync_wasender("test_api_key", retry_options=retry_config_disabled)
+    client._post_internal = Mock(name="_post_internal")
     
     mock_post_return_value = {
         "response": {"success": True, "message": "ok", "data": {"messageId": "mock_message_id"}},
@@ -38,6 +54,18 @@ def error_api_response_data():
         "message": "Invalid phone number format", 
         "errors": [{"field": "to", "message": "The 'to' field is invalid."}]
     }
+
+@pytest.fixture
+def sync_client_with_retry_enabled():
+    retry_config = RetryConfig(enabled=True, max_retries=3)
+    client = create_sync_wasender("test_api_key", retry_options=retry_config)
+    return client
+
+@pytest.fixture
+async def async_client_with_retry_enabled():
+    retry_config = RetryConfig(enabled=True, max_retries=3)
+    client = create_async_wasender("test_api_key", retry_options=retry_config)
+    return client
 
 @pytest.mark.asyncio
 async def test_send_text_constructs_correct_payload_and_calls_post_internal(async_client_with_mocked_post):
@@ -150,6 +178,7 @@ async def test_send_document(async_client_with_mocked_post, success_api_response
             "to": test_to,
             "messageType": "document",
             "documentUrl": test_url,
+            "fileName": test_filename,
             "text": test_caption
         }
     )
@@ -245,6 +274,43 @@ async def test_send_location(async_client_with_mocked_post, success_api_response
     assert response.response.message == success_api_response_data["message"]
 
 @pytest.mark.asyncio
+async def test_send_poll(async_client_with_mocked_post, success_api_response_data, rate_limit_data):
+        client = async_client_with_mocked_post
+        client._post_internal.return_value = {
+            "response": success_api_response_data,
+            "rate_limit": rate_limit_data
+        }
+        
+        test_to = "1234567890"
+        test_question = "What's your favorite color?"
+        test_options = ["Red", "Blue", "Green", "Yellow"]
+        test_multiple_answers = True
+
+        response = await client.send_poll(
+            to=test_to, 
+            question=test_question, 
+            options=test_options, 
+            is_multiple_choice=test_multiple_answers
+        )
+            
+        client._post_internal.assert_called_once_with(
+            "/send-message",
+            {
+            "to": test_to,
+            "messageType": "poll",
+            "poll": {
+                "question": test_question,
+                "options": test_options,
+                "multiSelect": test_multiple_answers
+            }
+            }
+        )
+        assert isinstance(response, WasenderSendResult)
+        assert response.response.success == True
+        assert response.response.message == success_api_response_data["message"]
+        assert response.rate_limit.limit == rate_limit_data["limit"]
+
+@pytest.mark.asyncio
 async def test_api_error_raised_from_post_internal(async_client_with_mocked_post, error_api_response_data):
     client = async_client_with_mocked_post
     
@@ -263,4 +329,10 @@ async def test_api_error_raised_from_post_internal(async_client_with_mocked_post
     
     assert exc_info.value.status_code == 400
     assert exc_info.value.api_message == original_api_message
-    assert exc_info.value.error_details == original_error_details 
+    assert exc_info.value.error_details == original_error_details
+
+
+
+
+
+
