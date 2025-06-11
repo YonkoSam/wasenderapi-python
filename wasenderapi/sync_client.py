@@ -420,7 +420,7 @@ class WasenderSyncClient:
         result = self._get_internal(f"/sessions/{session_id}/status", use_personal_token=True)
         return GetSessionStatusResult(**result)
 
-    async def handle_webhook_event(
+    def handle_webhook_event(
         self,
         request_body_bytes: bytes,
         signature_header: Optional[str]
