@@ -28,26 +28,29 @@ classifiers = [
 keywords = ["whatsapp", "api", "sdk", "wasender", "messaging", "chatbot"]
 
 dependencies = [
-    "httpx>=0.23.0,<0.28.0",
-    "pydantic>=2.0,<3.0",
-    "requests>=2.25.0,<3.0.0",
+    "httpx>=0.25.0,<0.29.0",
+    "pydantic>=2.5.0,<3.0.0",
+    "requests>=2.31.0,<3.0.0",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/YonkoSam/wasenderapi-python" # Assuming this will be your repo URL
-"Documentation" = "https://github.com/YonkoSam/wasenderapi-python/tree/main/docs" # Assuming
+"Homepage" = "https://github.com/YonkoSam/wasenderapi-python"
+"Documentation" = "https://github.com/YonkoSam/wasenderapi-python/tree/main/docs"
 "Repository" = "https://github.com/YonkoSam/wasenderapi-python"
 "Bug Tracker" = "https://github.com/YonkoSam/wasenderapi-python/issues"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0,<8.0.0",
+    "pytest>=7.4.0,<8.0.0",
     "pytest-asyncio>=0.20.0,<0.24.0",
+    "pytest-cov>=4.1.0,<5.0.0",
+    "pytest-mock>=3.12.0,<4.0.0",
     "respx>=0.20.0,<0.21.0",
     "mypy>=1.0.0,<2.0.0",
     "ruff>=0.1.0,<0.2.0",
-    "pre-commit>=3.0.0,<4.0.0"
+    "pre-commit>=3.0.0,<4.0.0",
+     "flake8>=6.0.0,<7.0.0"
 ]
 
 [tool.hatch.version]
-path = "wasenderapi/_version.py" 
+path = "wasenderapi/_version.py"
